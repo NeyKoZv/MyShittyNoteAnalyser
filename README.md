@@ -6,10 +6,8 @@ Plays a note into the mic and it shows you what it is, how accurate it is, and k
 ## Setup
 
 ```bash
-python -m venv venv
-venv\Scripts\activate      # Windows
-pip install numpy sounddevice
-pip install aubio          # optional, faster detection
+conda env create -f env.yaml
+conda activate MyShittyNoteAnalyser
 python MyShittyNoteAnalyser\main.py
 ```
 
