@@ -30,13 +30,13 @@ class NoteAnalyzerApp(QMainWindow):
 
         self.setWindowTitle("Note Analyzer")
 
-        # Full available screen height, respect user's width preference
+        # 90% of available screen height, respect user's width preference
         screen = self.screen().availableGeometry()
         try:
             w_s, _ = APP_GEOMETRY.split("x")
-            self.resize(int(w_s), screen.height())
+            self.resize(int(w_s), int(screen.height() * 0.9))
         except Exception:
-            self.resize(950, screen.height())
+            self.resize(950, int(screen.height() * 0.9))
 
         # Dark background on the central widget
         central = QWidget()
