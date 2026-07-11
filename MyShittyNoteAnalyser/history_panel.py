@@ -75,6 +75,68 @@ class HistoryPanel(ttk.LabelFrame):
         self._draw_scale()
         self.update_display()
 
+    # ── viewport helpers ─────────────────────────────────────────────────
+
+    def _get_visible_range(self):
+        """Return (start_idx, end_idx) for visible range + one screen preload."""
+        c = self.canvas
+        visible_w = max(c.winfo_width(), 100)
+        scroll_x = c.canvasx(0)
+
+        draw_start = max(0, scroll_x - visible_w)           # one screen before
+        draw_end = scroll_x + 2 * visible_w                  # one screen after
+
+        start_idx = int(draw_start / _NOTE_GAP)
+        end_idx = int(draw_end / _NOTE_GAP) + 1
+
+        total = len(self.note_history)
+        start_idx = max(0, start_idx)
+        end_idx = min(total, end_idx)
+        return start_idx, end_idx
+
+    def _redraw_visible(self) -> None:
+        """Redraw only the visible portion of the canvas + one screen preload."""
+        c = self.canvas
+        c.delete("block")
+        self.block_ids.clear()
+
+        history = self.note_history
+        total = len(history)
+        if total == 0:
+            return
+
+        h = c.winfo_height()
+        if h < 10:
+            h = 400
+
+        start_idx, end_idx = self._get_visible_range()
+        if start_idx >= end_idx:
+            return
+
+        # Draw grid lines only for the visible x-range
+        draw_start_x = start_idx * _NOTE_GAP
+        draw_end_x = end_idx * _NOTE_GAP
+
+        for midi in range(self.min_midi, self.max_midi + 1):
+            y = self._midi_to_y.get(midi)
+            if y is None:
+                continue
+            c.create_line(draw_start_x, y, draw_end_x, y,
+                          fill=COLOR_GRID_LINE, width=1, tags="block")
+
+        # Draw note blocks only in the visible range
+        for i in range(start_idx, end_idx):
+            entry = history[i]
+            if entry is None:
+                continue
+            midi_float, cents = entry
+            y = self._get_y(midi_float)
+            x = i * _NOTE_GAP
+            color = self._get_color(cents)
+            item = c.create_rectangle(x, y - 4, x + _NOTE_GAP - 1, y + 4,
+                                      fill=color, outline='', tags="block")
+            self.block_ids.append(item)
+
     # ── public API ────────────────────────────────────────────────────────
 
     def set_clear_callback(self, callback) -> None:
@@ -152,6 +214,7 @@ class HistoryPanel(ttk.LabelFrame):
     def _on_scrollbar(self, *args) -> None:
         self.canvas.xview(*args)
         self.auto_scroll = False
+        self._redraw_visible()
 
     def _on_canvas_click(self, event) -> None:
         self.auto_scroll = False
@@ -160,6 +223,7 @@ class HistoryPanel(ttk.LabelFrame):
         # Windows: event.delta is multiple of 120
         self.canvas.xview_scroll(-int(event.delta / 30), 'units')
         self.auto_scroll = False
+        self._redraw_visible()
 
     def _on_live(self) -> None:
         self.auto_scroll = True
@@ -174,46 +238,30 @@ class HistoryPanel(ttk.LabelFrame):
     def update_display(self) -> None:
         if not hasattr(self, '_midi_to_y'):
             return
-        c = self.canvas
-        c.delete("block")
-        self.block_ids.clear()
 
+        c = self.canvas
         history = self.note_history
         total = len(history)
+
         if total == 0:
+            c.delete("block")
+            self.block_ids.clear()
             c.configure(scrollregion=(0, 0, 1, 1))
             return
 
-        # Draw grid lines matching the scale on the notes canvas
+        # Update scroll region (extra margin so last note isn't cut off)
         h = c.winfo_height()
         if h < 10:
             h = 400
-        for midi in range(self.min_midi, self.max_midi + 1):
-            y = self._midi_to_y.get(midi)
-            if y is None:
-                continue
-            c.create_line(0, y, total * _NOTE_GAP, y,
-                          fill=COLOR_GRID_LINE, width=1, tags="block")
-
-        # Draw note blocks
-        for i, entry in enumerate(history):
-            if entry is None:
-                continue
-            midi_float, cents = entry
-            y = self._get_y(midi_float)
-            x = i * _NOTE_GAP
-            color = self._get_color(cents)
-            item = c.create_rectangle(x, y - 4, x + _NOTE_GAP - 1, y + 4,
-                                      fill=color, outline='', tags="block")
-            self.block_ids.append(item)
-
-        # Update scroll region (extra margin so last note isn't cut off)
         content_w = max(total * _NOTE_GAP + 20, c.winfo_width())
         c.configure(scrollregion=(0, 0, content_w, h))
 
-        # Auto-scroll to end
+        # Auto-scroll to end *before* drawing so we draw the right slice
         if self.auto_scroll:
             self.canvas.xview_moveto(1.0)
+
+        # Only draw what's visible + one screen preload
+        self._redraw_visible()
 
     # ── helpers ───────────────────────────────────────────────────────────
 

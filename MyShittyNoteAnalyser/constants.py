@@ -7,7 +7,7 @@ NOTE_FLAT_SOLFEGE = ['Do', 'Réb', 'Ré', 'Mib', 'Mi', 'Fa', 'Solb', 'Sol', 'Lab
 
 # Notation choices
 NOTATION_OPTIONS = ["Sharps", "Flats"]
-DEFAULT_NOTATION = "Sharps"
+DEFAULT_NOTATION = "Flats"
 DEFAULT_INSTRUMENT = "Concert (C)"
 
 # Instrument transpositions
@@ -29,7 +29,7 @@ MIN_MIDI = 48
 MAX_MIDI = 74
 
 # History
-NOTE_HISTORY_MAXLEN = 10000
+NOTE_HISTORY_MAXLEN = 100000
 
 # Audio defaults
 DEFAULT_SAMPLE_RATE = 44100
@@ -37,7 +37,7 @@ DEFAULT_BLOCK_SIZE = 2048
 BUFFER_OPTIONS = [128, 256, 512, 1024, 2048, 4096]
 
 # Threshold
-NOISE_THRESHOLD_DEFAULT = 0.01
+NOISE_THRESHOLD_DEFAULT = 0.02
 NOISE_THRESHOLD_MIN = 0.0
 NOISE_THRESHOLD_MAX = 0.05
 
