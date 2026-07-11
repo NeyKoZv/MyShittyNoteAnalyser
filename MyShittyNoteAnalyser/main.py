@@ -1,8 +1,8 @@
 """Entry point for the Note Analyzer application."""
 import sys
 from PyQt6.QtWidgets import QApplication
-from gui import NoteAnalyzerApp
-from theme import STYLESHEET
+from MyShittyNoteAnalyser.gui import NoteAnalyzerApp
+from MyShittyNoteAnalyser.theme import STYLESHEET
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

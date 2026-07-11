@@ -7,15 +7,16 @@ from PyQt6.QtGui import QPainter, QColor, QPen, QFont
 from PyQt6.QtCore import Qt, QRectF
 from PyQt6.QtSvg import QSvgRenderer
 
-from game_constants import (GAME_BG, GAME_STAFF_LINE, GAME_NOTEHEAD,
-                            GAME_NOTEHEAD_OUTLINE,
-                            STAFF_LINE_COUNT, STAFF_LINE_SPACING,
-                            STAFF_MARGIN_TOP, STAFF_MARGIN_BOTTOM,
-                            NOTEHEAD_WIDTH, NOTEHEAD_HEIGHT,
-                            NOTEHEAD_TILT, LEDGER_LINE_EXTEND,
-                            CLEF_WIDTH, CLEF_MARGIN,
-                            TREBLE_BOTTOM_LINE_MIDI, BASS_BOTTOM_LINE_MIDI)
-from note_utils import resource_path, midi_to_staff_y, ledger_lines
+from MyShittyNoteAnalyser.game_constants import (GAME_BG, GAME_STAFF_LINE, GAME_NOTEHEAD,
+                                                 GAME_NOTEHEAD_OUTLINE,
+                                                 STAFF_LINE_COUNT, STAFF_LINE_SPACING,
+                                                 STAFF_TOTAL_HEIGHT,
+                                                 STAFF_MARGIN_TOP, STAFF_MARGIN_BOTTOM,
+                                                 NOTEHEAD_WIDTH, NOTEHEAD_HEIGHT,
+                                                 NOTEHEAD_TILT, LEDGER_LINE_EXTEND,
+                                                 CLEF_WIDTH, CLEF_MARGIN,
+                                                 TREBLE_BOTTOM_LINE_MIDI, BASS_BOTTOM_LINE_MIDI)
+from MyShittyNoteAnalyser.note_utils import resource_path, midi_to_staff_y, ledger_lines
 
 
 class StaffCanvas(QWidget):
@@ -63,13 +64,12 @@ class StaffCanvas(QWidget):
                             else BASS_BOTTOM_LINE_MIDI)
 
         # ── staff geometry ──────────────────────────────────────
-        staff_total_height = (STAFF_LINE_COUNT - 1) * STAFF_LINE_SPACING
         staff_top = STAFF_MARGIN_TOP
-        staff_bottom = staff_top + staff_total_height
+        staff_bottom = staff_top + STAFF_TOTAL_HEIGHT
 
         # Center staff vertically in available space
         avail = h - STAFF_MARGIN_TOP - STAFF_MARGIN_BOTTOM
-        offset_y = max(0, (avail - staff_total_height) // 2)
+        offset_y = max(0, (avail - STAFF_TOTAL_HEIGHT) // 2)
         staff_top += offset_y
         staff_bottom += offset_y
 
@@ -79,14 +79,14 @@ class StaffCanvas(QWidget):
         if clef == "treble":
             # Treble v2: viewBox 95×153, fills it well
             clef_w = CLEF_WIDTH
-            clef_h = int(staff_total_height * 2.2)
-            clef_y = int(staff_top - staff_total_height * 0.25)
+            clef_h = int(STAFF_TOTAL_HEIGHT * 2.2)
+            clef_y = int(staff_top - STAFF_TOTAL_HEIGHT * 0.25)
         else:
             # Bass v2: viewBox 744×1052, content occupies ~middle 55%
             # Render wider so the clef is proportional to staff
             clef_w = int(CLEF_WIDTH * 1.6)
-            clef_h = int(staff_total_height * 2.0)
-            clef_y = int(staff_top - staff_total_height * 0.35)
+            clef_h = int(STAFF_TOTAL_HEIGHT * 2.0)
+            clef_y = int(staff_top - STAFF_TOTAL_HEIGHT * 0.35)
 
         renderer = (self._treble_renderer if clef == "treble"
                     else self._bass_renderer)
@@ -97,7 +97,7 @@ class StaffCanvas(QWidget):
             font = QFont("Helvetica", 28, QFont.Weight.Bold)
             p.setFont(font)
             p.setPen(QColor(GAME_STAFF_LINE))
-            p.drawText(clef_x, staff_top + int(staff_total_height * 0.6),
+            p.drawText(clef_x, staff_top + int(STAFF_TOTAL_HEIGHT * 0.6),
                        "𝄞" if clef == "treble" else "𝄢")
 
         # ── staff lines ─────────────────────────────────────────

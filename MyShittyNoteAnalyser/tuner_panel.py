@@ -2,10 +2,11 @@ from PyQt6.QtWidgets import QWidget
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont
 from PyQt6.QtCore import Qt
 
-from constants import (MIN_MIDI, MAX_MIDI, NOTE_SHARP_LETTER,
-                       COLOR_BG_DARKER, COLOR_TUNER_TICK, COLOR_TUNER_LABEL,
-                       COLOR_ACCENT_PERFECT,
-                       TUNER_WIDTH, TUNER_HEIGHT, TUNER_MARGIN, TUNER_DOT_RADIUS)
+from MyShittyNoteAnalyser.constants import (MIN_MIDI, MAX_MIDI, NOTE_SHARP_LETTER,
+                                            COLOR_BG_DARKER, COLOR_TUNER_TICK, COLOR_TUNER_LABEL,
+                                            COLOR_ACCENT_PERFECT,
+                                            TUNER_WIDTH, TUNER_HEIGHT, TUNER_MARGIN, TUNER_DOT_RADIUS)
+from MyShittyNoteAnalyser.note_utils import midi_to_y, midi_to_letter_octave
 
 
 class TunerPanel(QWidget):
@@ -61,26 +62,24 @@ class TunerPanel(QWidget):
         tick_pen = QPen(QColor(COLOR_TUNER_TICK), 1)
         label_font = QFont("Helvetica", 7)
         for midi in range(self.min_midi, self.max_midi + 1, 3):
-            frac = (midi - self.min_midi) / (self.max_midi - self.min_midi)
-            y = int(plot_bottom - frac * plot_height)
+            y = int(midi_to_y(midi, self.min_midi, self.max_midi,
+                              plot_top, plot_bottom))
 
             p.setPen(tick_pen)
             p.drawLine(w - 10, y, w, y)
 
-            note_idx = midi % 12
-            letter = NOTE_SHARP_LETTER[note_idx]
-            octave = (midi // 12) - 1
+            label = midi_to_letter_octave(midi, use_sharps=True)
             p.setPen(QColor(COLOR_TUNER_LABEL))
             p.setFont(label_font)
             p.drawText(0, y - 7, w - 14, 14,
                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                       f"{letter}{octave}")
+                       label)
 
         # indicator dot
         if self._midi_float is not None:
             clamped = max(self.min_midi, min(self.max_midi, self._midi_float))
-            frac = (clamped - self.min_midi) / (self.max_midi - self.min_midi)
-            dy = plot_bottom - frac * plot_height
+            dy = midi_to_y(clamped, self.min_midi, self.max_midi,
+                           plot_top, plot_bottom)
             r = TUNER_DOT_RADIUS
 
             p.setPen(Qt.PenStyle.NoPen)

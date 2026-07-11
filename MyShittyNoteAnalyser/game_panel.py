@@ -15,24 +15,25 @@ from PyQt6.QtWidgets import (QWidget, QLabel, QVBoxLayout)
 from PyQt6.QtGui import QFont
 from PyQt6.QtCore import Qt, pyqtSignal
 
-from constants import (MIN_MIDI, MAX_MIDI,
-                       COLOR_ACCENT_PERFECT, COLOR_ACCENT_NICE,
-                       COLOR_ACCENT_GOOD, COLOR_ACCENT_BAD)
-from game_constants import (
+from MyShittyNoteAnalyser.constants import (MIN_MIDI, MAX_MIDI)
+from MyShittyNoteAnalyser.game_constants import (
     GAME_BG, GAME_NOTEHEAD,
     GAME_TARGET_TEXT, GAME_CORRECT, GAME_WRONG,
     GAME_FEEDBACK_BG, GAME_STATS,
     GAME_TOP_BAR_HEIGHT, GAME_FEEDBACK_HEIGHT,
     GAME_HOLD_BAR_HEIGHT, GAME_CURRENT_NOTE_HEIGHT,
-    INSTRUMENT_WRITTEN_RANGE,
     MATCH_TOLERANCE_CENTS, SCORE_PER_NOTE,
     HOLD_DURATION_DEFAULT,
-    INSTRUMENT_CLEF_MAP, DEFAULT_CLEF,
 )
-from note_utils import midi_to_note_text
-from hold_progress_bar import HoldProgressBar
-from game_overlay import GameOverlay
-from staff_canvas import StaffCanvas
+from MyShittyNoteAnalyser.instrument_notation import (
+    DEFAULT_CLEF,
+    get_clef_for_instrument,
+    get_written_range_for_instrument,
+)
+from MyShittyNoteAnalyser.note_utils import midi_to_note_text, cents_to_color
+from MyShittyNoteAnalyser.hold_progress_bar import HoldProgressBar
+from MyShittyNoteAnalyser.game_overlay import GameOverlay
+from MyShittyNoteAnalyser.staff_canvas import StaffCanvas
 
 
 # ------------------------------------------------------------------
@@ -144,9 +145,6 @@ class GamePanel(QWidget):
         self._overlay.play_again_callback = self._on_play_again
         self._overlay.back_callback = self._on_back_to_tuner
 
-        # Callbacks for controller
-        self.back_to_tuner_callback = None
-
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self._overlay is not None:
@@ -229,7 +227,7 @@ class GamePanel(QWidget):
         midi_rounded = round(midi_float)
         solf, letter = midi_to_note_text(midi_rounded, self._use_sharps)
         c = self._current_cents
-        col = self._color_for_cents(c)
+        col = cents_to_color(c)
         self._current_label.setText(
             f"<span style='color: {col};'>"
             f"Playing: {solf} ({letter})  {c:+.1f}¢</span>")
@@ -273,7 +271,7 @@ class GamePanel(QWidget):
 
         ts, tl = midi_to_note_text(self._target_midi, self._use_sharps)
         self._feedback_label.setText(
-            f"<span style='color: {GAME_CORRECT};'>&#x2705; {ts} ({tl}) — Correct!</span>")
+            f"<span style='color: {GAME_CORRECT};'>&#x2705; {ts} ({tl}) — Correct</span>")
 
         self._hold_timer = 0.0
         self._is_holding = False
@@ -299,15 +297,7 @@ class GamePanel(QWidget):
             high = self._max_midi
         else:
             # 2) Use the instrument's written range
-            inst_range = INSTRUMENT_WRITTEN_RANGE.get(self._instrument)
-            if inst_range is not None:
-                low, high = inst_range
-            else:
-                # 3) Fallback: clef-based range
-                if self._clef == "bass":
-                    low, high = 40, 60  # conservative bass range
-                else:
-                    low, high = 57, 79  # conservative treble range
+            low, high = get_written_range_for_instrument(self._instrument)
 
         available = list(range(low, high + 1))
         if not available:
@@ -363,8 +353,6 @@ class GamePanel(QWidget):
         self._overlay.hide_overlay()
         self._game_active = False
         self.back_to_tuner.emit()
-        if self.back_to_tuner_callback:
-            self.back_to_tuner_callback()
 
     # ── display updates ────────────────────────────────────────────
 
@@ -382,19 +370,6 @@ class GamePanel(QWidget):
         solf, letter = midi_to_note_text(self._target_midi, self._use_sharps)
         self._target_label.setText(f"{solf} ({letter})")
         self._staff_canvas.set_target(self._target_midi)
-
-    # ── helpers ────────────────────────────────────────────────────
-
-    @staticmethod
-    def _color_for_cents(cents: float) -> str:
-        a = abs(cents)
-        if a < 5:
-            return COLOR_ACCENT_PERFECT
-        if a < 20:
-            return COLOR_ACCENT_NICE
-        if a < 50:
-            return COLOR_ACCENT_GOOD
-        return COLOR_ACCENT_BAD
 
     # ── setters for external configuration ─────────────────────────
 
@@ -423,7 +398,7 @@ class GamePanel(QWidget):
 
     def set_instrument(self, instrument: str) -> None:
         self._instrument = instrument
-        self._clef = INSTRUMENT_CLEF_MAP.get(instrument, DEFAULT_CLEF)
+        self._clef = get_clef_for_instrument(instrument)
         self._staff_canvas.set_clef(self._clef)
 
     def set_range(self, min_midi: int, max_midi: int) -> None:

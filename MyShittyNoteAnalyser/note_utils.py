@@ -2,15 +2,21 @@
 
 import os
 
-from constants import (NOTE_SHARP_SOLFEGE, NOTE_SHARP_LETTER,
-                       NOTE_FLAT_SOLFEGE, NOTE_FLAT_LETTER)
+from MyShittyNoteAnalyser.constants import (NOTE_SHARP_SOLFEGE, NOTE_SHARP_LETTER,
+                                            NOTE_FLAT_SOLFEGE, NOTE_FLAT_LETTER,
+                                            COLOR_ACCENT_PERFECT, COLOR_ACCENT_NICE,
+                                            COLOR_ACCENT_GOOD, COLOR_ACCENT_BAD)
 
+
+# ── resource path ────────────────────────────────────────────────────
 
 def resource_path(filename: str) -> str:
     """Get the absolute path to a resource file."""
     return os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "resources", filename)
 
+
+# ── MIDI ↔ note name conversion ─────────────────────────────────────
 
 def midi_to_note_text(midi: int, use_sharps: bool) -> tuple[str, str]:
     """Return (solfege, letter+octave) for a MIDI note number."""
@@ -23,6 +29,59 @@ def midi_to_note_text(midi: int, use_sharps: bool) -> tuple[str, str]:
         solf = NOTE_FLAT_SOLFEGE[idx]
         letter = f"{NOTE_FLAT_LETTER[idx]}{octave}"
     return solf, letter
+
+
+def midi_to_note_label(midi: int, use_sharps: bool) -> str:
+    """Return a user-friendly combined label, e.g. 60 → 'Do (C4)'."""
+    solf, letter = midi_to_note_text(midi, use_sharps)
+    return f"{solf} ({letter})"
+
+
+def midi_to_letter_octave(midi: int, use_sharps: bool) -> str:
+    """Return letter+octave only, e.g. 60 → 'C4'."""
+    _, letter = midi_to_note_text(midi, use_sharps)
+    return letter
+
+
+# ── cents → accuracy color ──────────────────────────────────────────
+
+def cents_to_color(cents: float) -> str:
+    """Map a cents-deviation to an accuracy colour constant."""
+    a = abs(cents)
+    if a < 5:
+        return COLOR_ACCENT_PERFECT
+    if a < 20:
+        return COLOR_ACCENT_NICE
+    if a < 50:
+        return COLOR_ACCENT_GOOD
+    return COLOR_ACCENT_BAD
+
+
+def cents_to_accuracy(cents: float) -> tuple[str, str]:
+    """Return (label, color_hex) for a cents deviation, e.g. ('Perfect', '#00ff88')."""
+    a = abs(cents)
+    if a < 5:
+        return "Perfect", COLOR_ACCENT_PERFECT
+    if a < 20:
+        return "Nice", COLOR_ACCENT_NICE
+    if a < 50:
+        return "Good", COLOR_ACCENT_GOOD
+    return "Bad", COLOR_ACCENT_BAD
+
+
+# ── MIDI ↔ pixel position ───────────────────────────────────────────
+
+def midi_to_y(midi: float, min_midi: int, max_midi: int,
+              top_y: float, bottom_y: float) -> float:
+    """Map a MIDI value (float or int) to a vertical pixel position.
+
+    ``top_y`` is the canvas coordinate of the *highest* MIDI,
+    ``bottom_y`` is the canvas coordinate of the *lowest* MIDI.
+    """
+    if max_midi <= min_midi:
+        return bottom_y
+    frac = (midi - min_midi) / (max_midi - min_midi)
+    return bottom_y - frac * (bottom_y - top_y)
 
 
 def midi_to_staff_y(midi: int, bottom_line_midi: int,
@@ -39,6 +98,8 @@ def midi_to_staff_y(midi: int, bottom_line_midi: int,
     # staff_bottom_y is bottom line, staff_top_y is top line
     return staff_bottom_y - frac * staff_height
 
+
+# ── ledger lines ────────────────────────────────────────────────────
 
 def ledger_lines(midi: int, bottom_line_midi: int) -> list[int]:
     """Return the MIDI values that need ledger lines for a given note.
@@ -62,3 +123,13 @@ def ledger_lines(midi: int, bottom_line_midi: int) -> list[int]:
             lines.append(above)
         above += 1
     return lines
+
+
+# ── buffer display formatting ───────────────────────────────────────
+
+def format_buffer_display(buf_size: int, sample_rate: int) -> str:
+    """Return a standardised buffer-size display string.
+
+    Example: ``format_buffer_display(2048, 44100)`` → ``"2048  (min 22 Hz)"``.
+    """
+    return f"{buf_size}  (min {sample_rate / buf_size:.0f} Hz)"

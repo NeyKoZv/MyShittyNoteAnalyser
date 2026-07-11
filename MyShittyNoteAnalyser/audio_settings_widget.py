@@ -8,11 +8,12 @@ from PyQt6.QtWidgets import (QWidget, QLabel, QComboBox, QSlider,
 from PyQt6.QtGui import QPainter, QColor, QPen
 from PyQt6.QtCore import Qt, pyqtSignal
 
-from constants import (DEFAULT_SAMPLE_RATE, DEFAULT_BLOCK_SIZE,
+from MyShittyNoteAnalyser.constants import (DEFAULT_SAMPLE_RATE, DEFAULT_BLOCK_SIZE,
                        BUFFER_OPTIONS, NOISE_THRESHOLD_DEFAULT,
                        NOISE_THRESHOLD_MIN, NOISE_THRESHOLD_MAX,
                        COLOR_ACCENT_PERFECT, COLOR_ACCENT_GOOD,
                        COLOR_ACCENT_BAD)
+from MyShittyNoteAnalyser.note_utils import format_buffer_display
 
 
 # ── RMS meter (tiny bar) ──────────────────────────────────────────
@@ -70,17 +71,12 @@ class AudioSettingsWidget(QWidget):
         self._label_width = label_width
         self.sample_rate: int = DEFAULT_SAMPLE_RATE
 
-        # Legacy callbacks — set by the owning panel / controller
-        # (kept for backward compatibility, will be removed in Phase 3)
-        self.device_callback = None
-        self.buffer_callback = None
-        self.threshold_changed_callback = None
-
         # Internal lookup tables for buffer display strings
         self.buffer_to_display: dict = {}
         self.display_to_buffer: dict = {}
 
         self._build_ui()
+        self.build_buffer_options()
 
     # ── UI ─────────────────────────────────────────────────────────
 
@@ -151,13 +147,9 @@ class AudioSettingsWidget(QWidget):
         self._threshold_lbl.setText(f"{value:.3f}")
         self._rms_meter.set_threshold_line(value / NOISE_THRESHOLD_MAX)
         self.threshold_changed.emit(value)
-        if self.threshold_changed_callback:
-            self.threshold_changed_callback(value)
 
     def _on_device_changed(self, _text: str) -> None:
         self.device_changed.emit()
-        if self.device_callback:
-            self.device_callback()
 
     def _on_buffer_changed(self, text: str) -> None:
         if not text:
@@ -165,8 +157,6 @@ class AudioSettingsWidget(QWidget):
         try:
             buf_val = int(text.split()[0])
             self.buffer_changed.emit(buf_val)
-            if self.buffer_callback:
-                self.buffer_callback(buf_val)
         except (ValueError, IndexError):
             pass
 
@@ -180,34 +170,33 @@ class AudioSettingsWidget(QWidget):
         """Update sample rate and rebuild buffer display strings."""
         self.sample_rate = sr
         current = self._buffer_cb.currentText()
-        self._build_buffer_options()
+        self.build_buffer_options()
         idx = self._buffer_cb.findText(current)
         if idx >= 0:
             self._buffer_cb.setCurrentIndex(idx)
         else:
-            default = f"2048  (min {sr / 2048:.0f} Hz)"
+            default = format_buffer_display(2048, sr)
             idx = self._buffer_cb.findText(default)
             if idx >= 0:
                 self._buffer_cb.setCurrentIndex(idx)
             elif self._buffer_cb.count() > 0:
                 self._buffer_cb.setCurrentIndex(0)
 
-    def _build_buffer_options(self) -> None:
+    def build_buffer_options(self) -> None:
         sr = self.sample_rate
         self.buffer_to_display.clear()
         self.display_to_buffer.clear()
         self._buffer_cb.blockSignals(True)
         self._buffer_cb.clear()
         for b in BUFFER_OPTIONS:
-            low_freq = sr / b
-            display_str = f"{b}  (min {low_freq:.0f} Hz)"
+            display_str = format_buffer_display(b, sr)
             self._buffer_cb.addItem(display_str)
             self.buffer_to_display[b] = display_str
             self.display_to_buffer[display_str] = b
         self._buffer_cb.blockSignals(False)
 
         # Auto-select 2048
-        default_str = f"2048  (min {sr / 2048:.0f} Hz)"
+        default_str = format_buffer_display(2048, sr)
         idx = self._buffer_cb.findText(default_str)
         if idx >= 0:
             self._buffer_cb.setCurrentIndex(idx)

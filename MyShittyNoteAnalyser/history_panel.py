@@ -3,15 +3,14 @@ from PyQt6.QtWidgets import (QWidget, QGroupBox, QPushButton, QScrollBar,
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont
 from PyQt6.QtCore import Qt, pyqtSignal
 
-from constants import (MIN_MIDI, MAX_MIDI, NOTE_SHARP_LETTER, NOTE_SHARP_SOLFEGE,
-                       NOTE_FLAT_LETTER, NOTE_FLAT_SOLFEGE,
-                       COLOR_BG_DARK, COLOR_BG_DARKER, COLOR_BG_CANVAS,
-                       COLOR_BG_INPUT, COLOR_FG_PRIMARY,
-                       COLOR_GRID_LINE, COLOR_GRID_LABEL,
-                       COLOR_ACCENT_PERFECT, COLOR_ACCENT_NICE,
-                       COLOR_ACCENT_GOOD, COLOR_ACCENT_BAD,
-                       HISTORY_NOTE_GAP, HISTORY_SCALE_WIDTH,
-                       DEFAULT_NOTATION)
+from MyShittyNoteAnalyser.constants import (MIN_MIDI, MAX_MIDI, NOTE_SHARP_LETTER, NOTE_SHARP_SOLFEGE,
+                                            NOTE_FLAT_LETTER, NOTE_FLAT_SOLFEGE,
+                                            COLOR_BG_DARK, COLOR_BG_DARKER, COLOR_BG_CANVAS,
+                                            COLOR_BG_INPUT, COLOR_FG_PRIMARY,
+                                            COLOR_GRID_LINE, COLOR_GRID_LABEL,
+                                            HISTORY_NOTE_GAP, HISTORY_SCALE_WIDTH,
+                                            DEFAULT_NOTATION)
+from MyShittyNoteAnalyser.note_utils import cents_to_color, midi_to_y
 
 _NOTE_GAP = HISTORY_NOTE_GAP
 _SCALE_W = HISTORY_SCALE_WIDTH
@@ -36,34 +35,22 @@ class _HistoryCanvas(QWidget):
         if h < 10:
             h = 400
         top, bottom = 10, h - 10
-        height = bottom - top
         pn = self.panel
         pn._midi_to_y = {}
         pn._plot_top = top
         pn._plot_bottom = bottom
-        pn._plot_height = height
+        pn._plot_height = bottom - top
         for midi in range(pn.min_midi, pn.max_midi + 1):
-            frac = (midi - pn.min_midi) / (pn.max_midi - pn.min_midi)
-            pn._midi_to_y[midi] = bottom - frac * height
+            pn._midi_to_y[midi] = midi_to_y(
+                midi, pn.min_midi, pn.max_midi, top, bottom)
 
     def _get_y(self, midi_float: float) -> float:
         pn = self.panel
         if pn.quantize:
             return pn._midi_to_y.get(round(midi_float), pn._plot_bottom)
         clamped = max(pn.min_midi, min(pn.max_midi, midi_float))
-        frac = (clamped - pn.min_midi) / (pn.max_midi - pn.min_midi)
-        return pn._plot_bottom - frac * pn._plot_height
-
-    @staticmethod
-    def _color_for_cents(cents: float) -> str:
-        a = abs(cents)
-        if a < 5:
-            return COLOR_ACCENT_PERFECT
-        if a < 20:
-            return COLOR_ACCENT_NICE
-        if a < 50:
-            return COLOR_ACCENT_GOOD
-        return COLOR_ACCENT_BAD
+        return midi_to_y(clamped, pn.min_midi, pn.max_midi,
+                         pn._plot_top, pn._plot_bottom)
 
     # ── paint ────────────────────────────────────────────────────────
 
@@ -140,8 +127,12 @@ class _HistoryCanvas(QWidget):
                     continue
                 midi_f, cents = entry
                 y = int(self._get_y(midi_f))
-                cx = max(_SCALE_W, note_x(i))  # clip to scale edge
-                color = self._color_for_cents(cents)
+                nx = note_x(i)
+                # Skip notes entirely off-screen to the left
+                if nx + _NOTE_GAP < _SCALE_W:
+                    continue
+                cx = int(nx)
+                color = cents_to_color(cents)
 
                 p.setBrush(QColor(color))
                 p.drawRect(cx, y - 4, _NOTE_GAP - 1, 8)

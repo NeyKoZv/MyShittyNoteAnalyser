@@ -24,6 +24,22 @@ INSTRUMENTS = {
     "Bass Guitar": 0,
 }
 
+# Default notation per instrument — wind instruments in flat keys (Bb, Eb, F)
+# → Flats; string instruments in sharp keys (G, D, A, E) → Sharps.
+# User can override at any time via the notation dropdown.
+DEFAULT_NOTATION_BY_INSTRUMENT = {
+    "Concert (C)":      "Flats",
+    "Bb Clarinet":      "Flats",
+    "A Clarinet":       "Flats",
+    "Eb Clarinet":      "Flats",
+    "Bb Trumpet":       "Flats",
+    "Alto Sax":         "Flats",
+    "Tenor Sax":        "Flats",
+    "French Horn":      "Flats",
+    "Guitar":           "Sharps",
+    "Bass Guitar":      "Sharps",
+}
+
 # Fixed MIDI range (C2–B5)
 MIN_MIDI = 48
 MAX_MIDI = 74

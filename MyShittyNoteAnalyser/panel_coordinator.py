@@ -4,11 +4,8 @@ that were previously inlined in NoteAnalyzerApp.
 
 Extracted from gui.py as part of Phase 3 refactoring.
 """
-from constants import (NOTE_SHARP_LETTER, NOTE_SHARP_SOLFEGE,
-                       NOTE_FLAT_LETTER, NOTE_FLAT_SOLFEGE,
-                       COLOR_ACCENT_PERFECT, COLOR_ACCENT_NICE,
-                       COLOR_ACCENT_GOOD, COLOR_ACCENT_BAD,
-                       NOTE_HISTORY_MAXLEN)
+from MyShittyNoteAnalyser.constants import NOTE_HISTORY_MAXLEN
+from MyShittyNoteAnalyser.note_utils import midi_to_note_text, cents_to_accuracy
 
 
 class PanelCoordinator:
@@ -96,27 +93,15 @@ class PanelCoordinator:
         """Update RMS meters in both panels."""
         self.settings_panel.set_rms_level(rms)
         if self.game_settings_panel:
-            self.game_settings_panel._audio.set_rms_level(rms)
+            self.game_settings_panel.set_rms_level(rms)
 
     # ── internal helpers ─────────────────────────────────────────
 
     def _update_info_from_midi(self, midi_float: float, cents: float) -> None:
         """Derive note name + accuracy from MIDI value, push to info panel."""
-        abs_cents = abs(cents)
-        if abs_cents < 5:
-            acc, color = "Perfect", COLOR_ACCENT_PERFECT
-        elif abs_cents < 20:
-            acc, color = "Nice", COLOR_ACCENT_NICE
-        elif abs_cents < 50:
-            acc, color = "Good", COLOR_ACCENT_GOOD
-        else:
-            acc, color = "Bad", COLOR_ACCENT_BAD
-
+        acc, color = cents_to_accuracy(cents)
         midi_rounded = round(midi_float)
-        note_idx = midi_rounded % 12
         notation = self.settings_panel.get_notation()
         use_sharps = notation == "Sharps"
-        letter = (NOTE_SHARP_LETTER if use_sharps else NOTE_FLAT_LETTER)[note_idx]
-        solfege = (NOTE_SHARP_SOLFEGE if use_sharps else NOTE_FLAT_SOLFEGE)[note_idx]
-
+        solfege, letter = midi_to_note_text(midi_rounded, use_sharps)
         self.info_panel.update_info(solfege, letter, acc, color, cents)

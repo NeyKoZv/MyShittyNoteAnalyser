@@ -2,11 +2,11 @@ from PyQt6.QtWidgets import QWidget, QLabel, QHBoxLayout
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont
 from PyQt6.QtCore import Qt
 
-from constants import (COLOR_BG_DARKER,
-                       COLOR_BG_METER, COLOR_FG_PRIMARY,
-                       COLOR_FG_SECONDARY, COLOR_METER_TICK,
-                       COLOR_METER_CENTER,
-                       METER_WIDTH, METER_HEIGHT)
+from MyShittyNoteAnalyser.constants import (COLOR_BG_DARKER,
+                                            COLOR_BG_METER, COLOR_FG_PRIMARY,
+                                            COLOR_FG_SECONDARY, COLOR_METER_TICK,
+                                            COLOR_METER_CENTER,
+                                            METER_WIDTH, METER_HEIGHT)
 
 
 class CentsMeter(QWidget):

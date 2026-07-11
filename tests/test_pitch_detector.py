@@ -1,14 +1,7 @@
 """Tests for pitch detection and note utility functions."""
 
-import sys
-import os
-
-# Allow running tests from the project root
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..',
-                                 'MyShittyNoteAnalyser'))
-
-from pitch_detector import freq_to_midi
-from note_utils import midi_to_note_text, midi_to_staff_y, ledger_lines
+from MyShittyNoteAnalyser.pitch_detector import freq_to_midi
+from MyShittyNoteAnalyser.note_utils import midi_to_note_text, midi_to_staff_y, ledger_lines
 
 
 class TestFreqToMidi:

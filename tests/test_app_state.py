@@ -1,14 +1,8 @@
 """Tests for the application state machine."""
 
-import sys
-import os
 import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..',
-                                 'MyShittyNoteAnalyser'))
-
-from app_state import (AppState, validate_transition,
-                       InvalidStateTransitionError)
+from MyShittyNoteAnalyser.app_state import (AppState, validate_transition,
+                                            InvalidStateTransitionError)
 
 
 class TestAppStateTransitions:

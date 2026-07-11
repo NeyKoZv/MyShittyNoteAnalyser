@@ -13,10 +13,10 @@ import sounddevice as sd
 from collections import deque
 from PyQt6.QtCore import QTimer, QObject, pyqtSignal
 
-from constants import (INSTRUMENTS, NOTE_HISTORY_MAXLEN,
-                       DEFAULT_SAMPLE_RATE, DEFAULT_BLOCK_SIZE)
-from pitch_detector import detect_pitch, freq_to_midi
-from app_state import AppState, validate_transition
+from MyShittyNoteAnalyser.constants import (INSTRUMENTS, NOTE_HISTORY_MAXLEN,
+                                            DEFAULT_SAMPLE_RATE, DEFAULT_BLOCK_SIZE)
+from MyShittyNoteAnalyser.pitch_detector import detect_pitch, freq_to_midi
+from MyShittyNoteAnalyser.app_state import AppState, validate_transition
 
 _logger = logging.getLogger(__name__)
 
@@ -118,6 +118,8 @@ class AudioStreamManager(QObject):
         if self.is_running:
             return
 
+        validate_transition(self.state, AppState.RMS_ONLY)
+
         self.sample_rate = sample_rate
         self.current_block_size = block_size
 
@@ -131,6 +133,7 @@ class AudioStreamManager(QObject):
             )
             self.stream.start()
             self.is_running = True
+            self.state = AppState.RMS_ONLY
             self.processing_thread = threading.Thread(
                 target=self._process_audio, daemon=True)
             self.processing_thread.start()
@@ -147,6 +150,7 @@ class AudioStreamManager(QObject):
         self.pending_midi = None
         self.pending_cents = None
         self.pending_rms = None
+        self.state = AppState.IDLE
 
         if self.stream:
             try:
@@ -169,19 +173,28 @@ class AudioStreamManager(QObject):
         was_full = self._full_analysis
         self.stop_stream()
         self.start_stream(device_idx, block_size, sample_rate)
-        self._full_analysis = was_full
+        if was_full:
+            self.enable_full_analysis()
 
     def enable_full_analysis(self) -> None:
         """Enable pitch detection + history recording."""
+        if self.state == AppState.FULL_ANALYSIS:
+            return  # already active — idempotent
+        validate_transition(self.state, AppState.FULL_ANALYSIS)
         self._full_analysis = True
+        self.state = AppState.FULL_ANALYSIS
 
     def disable_full_analysis(self) -> None:
         """Disable pitch detection; stream keeps running RMS-only."""
+        if self.state == AppState.RMS_ONLY:
+            return  # already RMS-only — idempotent
+        validate_transition(self.state, AppState.RMS_ONLY)
         self._full_analysis = False
         self.update_pending = False
         self.pending_midi = None
         self.pending_cents = None
         self.pending_rms = None
+        self.state = AppState.RMS_ONLY
 
     @property
     def full_analysis_active(self) -> bool:

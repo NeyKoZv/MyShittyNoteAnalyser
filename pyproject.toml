@@ -1,15 +1,9 @@
-[build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends._legacy:_Backend"
-
 [project]
-name = "myshittynoteanalyser"
+name = "MyShittyNoteAnalyser"
 version = "0.1.0"
 description = "Real-time pitch detection and note training game"
-authors = [{name = "Nicolas", email = "nicolas@ardisoft.com"}]
-readme = "README.md"
-license = {file = "LICENSE"}
-requires-python = ">=3.10"
+authors = [{ name = "Nicolas", email = "nicolas@ardisoft.com" }]
+requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.23,<3",
     "PyQt6>=6.11.0,<7",
@@ -20,14 +14,32 @@ dependencies = [
 aubio = ["aubio"]
 
 [project.scripts]
-noteio = "MyShittyNoteAnalyser.main:main"
+MyShittyNoteAnalyser = "MyShittyNoteAnalyser.main:main"
 
-[project.gui-scripts]
-noteio-gui = "MyShittyNoteAnalyser.main:main"
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["MyShittyNoteAnalyser*"]
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["win-64"]
+
+[tool.pixi.pypi-dependencies]
+MyShittyNoteAnalyser = { path = ".", editable = true }
+sounddevice = ">=0.5.5, <0.6"
+
+[tool.pixi.dependencies]
+numpy = ">=1.23,<3"
+pyqt6 = ">=6.11.0,<7"
+aubio = "*"
+portaudio = ">=19.7.0,<20"
+pytest = ">=9.1.1,<10"
+
+[tool.pixi.tasks]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import QWidget, QPushButton
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont
 from PyQt6.QtCore import Qt, QRectF
 
-from game_constants import (GAME_OVERLAY_WIDTH, GAME_OVERLAY_HEIGHT,
+from MyShittyNoteAnalyser.game_constants import (GAME_OVERLAY_WIDTH, GAME_OVERLAY_HEIGHT,
                             GAME_OVERLAY_CORNER_RADIUS,
                             GAME_CORRECT, GAME_STATS)
 
@@ -65,7 +65,7 @@ class GameOverlay(QWidget):
         p.setFont(title_font)
         p.setPen(QColor(GAME_CORRECT))
         if self._is_endless:
-            title = "🎵  Game Over!"
+            title = "🎵  Game Over"
         else:
             title = "🎉  Round Complete!"
         p.drawText(QRectF(card_x, card_y + 15, card_w, 35),

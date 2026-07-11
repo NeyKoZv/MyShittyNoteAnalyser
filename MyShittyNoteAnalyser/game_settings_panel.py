@@ -3,23 +3,26 @@ Game-mode settings panel — instrument, notation, display mode, game mode,
 scale direction, round length, hold duration, audio, and start/stop controls.
 """
 from PyQt6.QtWidgets import (QGroupBox, QLabel, QComboBox, QDoubleSpinBox,
-                               QPushButton, QVBoxLayout, QGridLayout,
-                               QWidget, QHBoxLayout)
+                               QPushButton, QVBoxLayout, QGridLayout)
 from PyQt6.QtCore import Qt, pyqtSignal
 
-from constants import (INSTRUMENTS, DEFAULT_INSTRUMENT,
+from MyShittyNoteAnalyser.constants import (INSTRUMENTS, DEFAULT_INSTRUMENT,
                        NOTATION_OPTIONS, DEFAULT_NOTATION)
-from game_constants import (
+from MyShittyNoteAnalyser.game_constants import (
     GAME_DISPLAY_MODES, DEFAULT_DISPLAY_MODE,
     GAME_MODES, DEFAULT_GAME_MODE,
     SCALE_DIRECTIONS, DEFAULT_SCALE_DIRECTION,
     GAME_LENGTHS, DEFAULT_GAME_LENGTH,
     HOLD_DURATION_MIN, HOLD_DURATION_MAX,
     HOLD_DURATION_DEFAULT, HOLD_DURATION_STEP,
-    INSTRUMENT_CLEF_MAP, DEFAULT_CLEF,
-    DEFAULT_NOTATION_BY_INSTRUMENT,
 )
-from audio_settings_widget import AudioSettingsWidget
+from MyShittyNoteAnalyser.instrument_notation import (
+    DEFAULT_CLEF,
+    get_clef_for_instrument,
+    resolve_notation_on_instrument_change,
+)
+from MyShittyNoteAnalyser.audio_settings_widget import AudioSettingsWidget
+from MyShittyNoteAnalyser.theme import section_header
 
 
 class GameSettingsPanel(QGroupBox):
@@ -41,24 +44,18 @@ class GameSettingsPanel(QGroupBox):
         super().__init__("Game Settings", parent)
         self.setObjectName("GameSettingsPanel")
 
-        # Callbacks set by the controller
-        self.start_callback = None
-        self.stop_callback = None
-        self.display_mode_callback = None
-        self.game_mode_callback = None
-        self.scale_direction_callback = None
-        self.game_length_callback = None
-        self.hold_duration_callback = None
-        self.instrument_callback = None
-        self.notation_callback = None
-        self.back_to_tuner_callback = None
-
         # Shared audio widget
         self._audio = AudioSettingsWidget(label_width=80)
-        self._audio._build_buffer_options()
 
         self._game_active = False
         self._build_ui()
+
+    # ── public access to sub-components ─────────────────────────────
+
+    @property
+    def audio(self):
+        """Public access to the shared AudioSettingsWidget."""
+        return self._audio
 
     # ── UI construction ─────────────────────────────────────────────
 
@@ -75,14 +72,8 @@ class GameSettingsPanel(QGroupBox):
         r = self._add_game_rules_section(grid, r)
         self._add_buttons(grid, r)
 
-    @staticmethod
-    def _section_header(text: str) -> QLabel:
-        lbl = QLabel(text)
-        lbl.setStyleSheet("font-weight: bold; font-size: 8pt;")
-        return lbl
-
     def _add_display_section(self, grid: QGridLayout, r: int) -> int:
-        grid.addWidget(self._section_header("─ DISPLAY ─"), r, 0, 1, 2)
+        grid.addWidget(section_header("─ DISPLAY ─"), r, 0, 1, 2)
         r += 1
 
         # Instrument
@@ -113,14 +104,14 @@ class GameSettingsPanel(QGroupBox):
         return r
 
     def _add_audio_section(self, grid: QGridLayout, r: int) -> int:
-        grid.addWidget(self._section_header("─ AUDIO ─"), r, 0, 1, 2)
+        grid.addWidget(section_header("─ AUDIO ─"), r, 0, 1, 2)
         r += 1
         grid.addWidget(self._audio, r, 0, 1, 2)
         r += 1
         return r
 
     def _add_game_rules_section(self, grid: QGridLayout, r: int) -> int:
-        grid.addWidget(self._section_header("─ GAME RULES ─"), r, 0, 1, 2)
+        grid.addWidget(section_header("─ GAME RULES ─"), r, 0, 1, 2)
         r += 1
 
         # Game mode
@@ -130,15 +121,6 @@ class GameSettingsPanel(QGroupBox):
         self._mode_cb.setCurrentText(DEFAULT_GAME_MODE)
         self._mode_cb.currentTextChanged.connect(self._on_game_mode_changed)
         grid.addWidget(self._mode_cb, r, 1)
-        r += 1
-
-        # Display mode
-        grid.addWidget(QLabel("Display:"), r, 0)
-        self._display_cb = QComboBox()
-        self._display_cb.addItems(GAME_DISPLAY_MODES)
-        self._display_cb.setCurrentText(DEFAULT_DISPLAY_MODE)
-        self._display_cb.currentTextChanged.connect(self._on_display_changed)
-        grid.addWidget(self._display_cb, r, 1)
         r += 1
 
         # Scale direction — hidden unless Mode is "Scale"
@@ -152,6 +134,15 @@ class GameSettingsPanel(QGroupBox):
         grid.addWidget(self._direction_cb, r, 1)
         self._direction_lbl.setVisible(False)
         self._direction_cb.setVisible(False)
+        r += 1
+
+        # Display mode
+        grid.addWidget(QLabel("Display:"), r, 0)
+        self._display_cb = QComboBox()
+        self._display_cb.addItems(GAME_DISPLAY_MODES)
+        self._display_cb.setCurrentText(DEFAULT_DISPLAY_MODE)
+        self._display_cb.currentTextChanged.connect(self._on_display_changed)
+        grid.addWidget(self._display_cb, r, 1)
         r += 1
 
         # Game length
@@ -194,70 +185,47 @@ class GameSettingsPanel(QGroupBox):
 
     def _on_display_changed(self, text: str) -> None:
         self.display_mode_changed.emit(text)
-        if self.display_mode_callback:
-            self.display_mode_callback(text)
 
     def _on_notation_changed(self, text: str) -> None:
         self.notation_changed.emit(text)
-        if self.notation_callback:
-            self.notation_callback(text)
 
     def _on_instrument_changed(self, text: str) -> None:
-        clef = INSTRUMENT_CLEF_MAP.get(text, DEFAULT_CLEF)
+        clef = get_clef_for_instrument(text)
         self._clef_lbl.setText(clef.capitalize())
         # Auto-switch notation to instrument's default
-        default_notation = DEFAULT_NOTATION_BY_INSTRUMENT.get(
-            text, DEFAULT_NOTATION)
+        default_notation = resolve_notation_on_instrument_change(text)
         self._notation_cb.blockSignals(True)
         self._notation_cb.setCurrentText(default_notation)
         self._notation_cb.blockSignals(False)
-        # Notify notation callback about the auto-change
+        # Notify about the auto-change
         self.notation_changed.emit(default_notation)
-        if self.notation_callback:
-            self.notation_callback(default_notation)
         self.instrument_changed.emit(text)
-        if self.instrument_callback:
-            self.instrument_callback(text)
 
     def _on_game_mode_changed(self, text: str) -> None:
         show_direction = (text == "Scale")
         self._direction_lbl.setVisible(show_direction)
         self._direction_cb.setVisible(show_direction)
         self.game_mode_changed.emit(text)
-        if self.game_mode_callback:
-            self.game_mode_callback(text)
 
     def _on_scale_direction_changed(self, text: str) -> None:
         self.scale_direction_changed.emit(text)
-        if self.scale_direction_callback:
-            self.scale_direction_callback(text)
 
     def _on_length_changed(self, text: str) -> None:
         self.game_length_changed.emit(text)
-        if self.game_length_callback:
-            self.game_length_callback(text)
 
     def _on_hold_duration_changed(self, val: float) -> None:
         self.hold_duration_changed.emit(val)
-        if self.hold_duration_callback:
-            self.hold_duration_callback(val)
 
     def _on_start_stop(self) -> None:
         if self._game_active:
             self.stop_requested.emit()
-            if self.stop_callback:
-                self.stop_callback()
         else:
             self.start_requested.emit()
-            if self.start_callback:
-                self.start_callback()
 
     def _on_back(self) -> None:
-        if self._game_active and self.stop_callback:
-            self.stop_callback()
+        if self._game_active:
+            self.stop_requested.emit()
         self.back_to_tuner.emit()
-        if self.back_to_tuner_callback:
-            self.back_to_tuner_callback()
 
     # ── public API ──────────────────────────────────────────────────
 
@@ -266,7 +234,7 @@ class GameSettingsPanel(QGroupBox):
         self._start_btn.setText("⏹  Stop Game" if active else "▶  Start Game")
 
     def set_clef(self, instrument_name: str) -> None:
-        clef = INSTRUMENT_CLEF_MAP.get(instrument_name, DEFAULT_CLEF)
+        clef = get_clef_for_instrument(instrument_name)
         self._clef_lbl.setText(clef.capitalize())
         # Keep instrument combo in sync
         self._instr_cb.blockSignals(True)
@@ -280,7 +248,7 @@ class GameSettingsPanel(QGroupBox):
         self._notation_cb.blockSignals(False)
 
     def build_buffer_options(self) -> None:
-        self._audio._build_buffer_options()
+        self._audio.build_buffer_options()
 
     def populate_devices(self, device_names: list) -> None:
         self._audio.populate_devices(device_names)
@@ -318,3 +286,18 @@ class GameSettingsPanel(QGroupBox):
 
     def get_buffer_size(self) -> int:
         return self._audio.get_buffer_size()
+
+    def set_sample_rate(self, sr: int) -> None:
+        self._audio.set_sample_rate(sr)
+
+    def set_rms_level(self, rms: float) -> None:
+        self._audio.set_rms_level(rms)
+
+    def set_device_text(self, text: str) -> None:
+        self._audio.set_device_text(text)
+
+    def set_threshold_value(self, value: float) -> None:
+        self._audio.set_threshold_value(value)
+
+    def set_buffer_display(self, text: str) -> None:
+        self._audio.set_buffer_display(text)

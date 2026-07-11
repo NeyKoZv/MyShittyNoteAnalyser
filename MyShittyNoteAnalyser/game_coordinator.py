@@ -4,7 +4,7 @@ synchronization between tuner and game modes.
 
 Extracted from gui.py as part of Phase 3 refactoring.
 """
-import sounddevice as sd
+from MyShittyNoteAnalyser.note_utils import format_buffer_display
 
 
 class GameCoordinator:
@@ -28,7 +28,8 @@ class GameCoordinator:
     # ── view switching ───────────────────────────────────────────
 
     def switch_to_game(self, sample_rate: int,
-                        tuner_full_analysis_active: bool = False) -> None:
+                        tuner_full_analysis_active: bool = False,
+                        device_names: list[str] | None = None) -> None:
         """Switch from tuner view to game view, syncing all settings.
 
         If the tuner had full analysis running, disable it first so the
@@ -49,24 +50,20 @@ class GameCoordinator:
         self.game_settings_panel.set_clef(instrument)
         self.game_settings_panel.set_notation(notation)
 
-        # Populate audio devices in game settings
-        devices = sd.query_devices()
-        clean_names = []
-        for dev in devices:
-            if dev['max_input_channels'] > 0:
-                clean_names.append(dev['name'])
-        self.game_settings_panel.populate_devices(clean_names)
+        # Populate audio devices in game settings (reuse caller's list)
+        if device_names is not None:
+            self.game_settings_panel.populate_devices(device_names)
 
         # Sync audio settings from main panel → game panel
-        self.game_settings_panel._audio.set_sample_rate(sample_rate)
-        self.game_settings_panel._audio.set_device_text(
+        self.game_settings_panel.set_sample_rate(sample_rate)
+        self.game_settings_panel.set_device_text(
             self.settings_panel.get_device())
-        self.game_settings_panel._audio.set_threshold_value(
+        self.game_settings_panel.set_threshold_value(
             self.settings_panel.get_threshold())
 
         buf_size = self.settings_panel.get_buffer_size()
-        buf_display = f"{buf_size}  (min {sample_rate / buf_size:.0f} Hz)"
-        self.game_settings_panel._audio.set_buffer_display(buf_display)
+        buf_display = format_buffer_display(buf_size, sample_rate)
+        self.game_settings_panel.set_buffer_display(buf_display)
 
         # Sync game panel settings from game settings panel
         self.game_panel.set_display_mode(
@@ -114,27 +111,18 @@ class GameCoordinator:
 
     def sync_device_from_game(self) -> None:
         """Sync device from game audio widget → main settings → restart."""
-        text = self.game_settings_panel._audio.get_device()
-        self.settings_panel._audio.set_device_text(text)
+        text = self.game_settings_panel.get_device()
+        self.settings_panel.set_device_text(text)
         if self.restart_stream_cb:
             self.restart_stream_cb()
 
     def sync_threshold_from_game(self, value: float) -> None:
         """Sync noise threshold from game audio widget → main settings."""
-        self.settings_panel._audio.set_threshold_value(value)
+        self.settings_panel.set_threshold_value(value)
 
     def sync_buffer_from_game(self, buf_val: int, sample_rate: int) -> None:
         """Sync buffer size from game audio widget → main settings."""
-        buf_display = f"{buf_val}  (min {sample_rate / buf_val:.0f} Hz)"
-        self.settings_panel._audio.set_buffer_display(buf_display)
+        buf_display = format_buffer_display(buf_val, sample_rate)
+        self.settings_panel.set_buffer_display(buf_display)
         if self.restart_stream_cb:
             self.restart_stream_cb(buf_val)
-
-    # ── game button handler ──────────────────────────────────────
-
-    def on_game_button(self) -> None:
-        """Handle the 🎮 Game button click."""
-        if self._view_stack.currentIndex() == 0:
-            self.switch_to_game(self.settings_panel._audio.sample_rate)
-        else:
-            self.switch_to_tuner()

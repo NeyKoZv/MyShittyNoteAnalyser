@@ -1,8 +1,10 @@
 """Application-wide stylesheet and color constants."""
 
-from constants import (COLOR_BG_DARK, COLOR_BG_DARKER, COLOR_BG_INPUT,
-                       COLOR_FG_PRIMARY, COLOR_FG_SECONDARY,
-                       COLOR_BUTTON_ACTIVE)
+from PyQt6.QtWidgets import QLabel
+
+from MyShittyNoteAnalyser.constants import (COLOR_BG_DARK, COLOR_BG_DARKER, COLOR_BG_INPUT,
+                                            COLOR_FG_PRIMARY, COLOR_FG_SECONDARY,
+                                            COLOR_BUTTON_ACTIVE)
 
 STYLESHEET = f"""
 QMainWindow {{
@@ -121,3 +123,12 @@ QLabel {{
     color: {COLOR_FG_PRIMARY};
     background: transparent;
 }}"""
+
+
+# ── reusable UI helpers ─────────────────────────────────────────────
+
+def section_header(text: str) -> QLabel:
+    """Return a bold, small-font section-header label used by settings panels."""
+    lbl = QLabel(text)
+    lbl.setStyleSheet("font-weight: bold; font-size: 8pt;")
+    return lbl

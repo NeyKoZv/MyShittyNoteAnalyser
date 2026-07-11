@@ -7,17 +7,16 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                                 QStackedWidget, QPushButton)
 from PyQt6.QtCore import QTimer
 
-from constants import (APP_GEOMETRY, DEFAULT_SAMPLE_RATE, DEFAULT_BLOCK_SIZE,
-                       NOTE_HISTORY_MAXLEN)
-from settings_panel import SettingsPanel
-from tuner_panel import TunerPanel
-from history_panel import HistoryPanel
-from info_panel import InfoPanel
-from game_panel import GamePanel
-from game_settings_panel import GameSettingsPanel
-from audio_stream_manager import AudioStreamManager
-from panel_coordinator import PanelCoordinator
-from game_coordinator import GameCoordinator
+from MyShittyNoteAnalyser.constants import APP_GEOMETRY
+from MyShittyNoteAnalyser.settings_panel import SettingsPanel
+from MyShittyNoteAnalyser.tuner_panel import TunerPanel
+from MyShittyNoteAnalyser.history_panel import HistoryPanel
+from MyShittyNoteAnalyser.info_panel import InfoPanel
+from MyShittyNoteAnalyser.game_panel import GamePanel
+from MyShittyNoteAnalyser.game_settings_panel import GameSettingsPanel
+from MyShittyNoteAnalyser.audio_stream_manager import AudioStreamManager
+from MyShittyNoteAnalyser.panel_coordinator import PanelCoordinator
+from MyShittyNoteAnalyser.game_coordinator import GameCoordinator
 
 
 class NoteAnalyzerApp(QMainWindow):
@@ -147,58 +146,49 @@ class NoteAnalyzerApp(QMainWindow):
         self.game_coord.disable_full_analysis_cb = self._disable_full_analysis
         self.game_coord.restart_stream_cb = self._restart_audio_stream
 
-        # ── Wire game panel signals ──────────────────────────────
-        self.game_settings_panel.display_mode_callback = self.game_panel.set_display_mode
-        self.game_settings_panel.game_mode_callback = self.game_panel.set_game_mode
-        self.game_settings_panel.scale_direction_callback = self.game_panel.set_scale_direction
-        self.game_settings_panel.game_length_callback = self.game_panel.set_game_length
-        self.game_settings_panel.hold_duration_callback = self.game_panel.set_hold_duration
-        self.game_settings_panel.instrument_callback = self.game_panel.set_instrument
-        self.game_settings_panel.notation_callback = self.game_panel.set_notation
-
-        # Wire game's audio widget → sync to main settings
-        self.game_settings_panel._audio.device_callback = self._on_game_device_changed
-        self.game_settings_panel._audio.threshold_changed_callback = self.game_coord.sync_threshold_from_game
-        self.game_settings_panel._audio.buffer_callback = self._on_game_buffer_changed
-
     # ── signal wiring ────────────────────────────────────────────
 
     def _wire_panel_signals(self) -> None:
-        """Connect panel signals to coordinator methods."""
+        """Connect panel signals to coordinator / controller methods."""
         sp = self.settings_panel
 
-        # Settings panel
+        # ── Settings panel signals → controller ─────────────────
         sp.set_start_stop_callback(self._toggle_analysis)
-        sp.set_buffer_callback(self._on_buffer_changed)
-        sp.set_device_callback(self._on_device_changed)
-        sp.set_notation_callback(self.coordinator.propagate_notation)
-        sp.set_quantize_callback(self.coordinator.propagate_quantize)
-        sp.set_min_max_callback(self.coordinator.propagate_range)
-        sp.set_reset_callback(self.coordinator.propagate_reset)
+        sp.audio.buffer_changed.connect(self._on_buffer_changed)
+        sp.audio.device_changed.connect(self._on_device_changed)
+        sp.notation_changed.connect(self.coordinator.propagate_notation)
+        sp.quantize_changed.connect(self.coordinator.propagate_quantize)
+        sp.range_changed.connect(self.coordinator.propagate_range)
+        sp.reset_requested.connect(self.coordinator.propagate_reset)
 
-        # ── sync audio-relevant settings to the audio manager in real-time ──
-        # These must be synced whenever changed, not just at analysis start,
-        # because the processing thread reads cached copies.
-        sp._instr_cb.currentTextChanged.connect(
-            lambda _: self._sync_audio_settings())
-        sp._audio.threshold_changed.connect(
-            lambda _v: self._sync_audio_settings())
-        sp._aubio_cb.toggled.connect(
-            lambda _: self._sync_audio_settings())
-        sp._continue_cb.toggled.connect(
-            lambda _: self._sync_audio_settings())
+        # ── sync audio settings to audio manager in real-time ────
+        sp.connect_audio_sync(self._sync_audio_settings)
 
-        # History panel
+        # ── History panel ────────────────────────────────────────
         self.history_panel.set_clear_callback(self._on_clear_history)
 
-        # Game settings → game coordinator
+        # ── Game settings signals → game coordinator ─────────────
         gsp = self.game_settings_panel
-        gsp.start_callback = self.game_coord.start_game
-        gsp.stop_callback = self.game_coord.stop_game
-        gsp.back_to_tuner_callback = self.game_coord.switch_to_tuner
+        gsp.start_requested.connect(self.game_coord.start_game)
+        gsp.stop_requested.connect(self.game_coord.stop_game)
+        gsp.back_to_tuner.connect(self.game_coord.switch_to_tuner)
 
-        # Game panel
-        self.game_panel.back_to_tuner_callback = self.game_coord.switch_to_tuner
+        # ── Game panel ───────────────────────────────────────────
+        self.game_panel.back_to_tuner.connect(self.game_coord.switch_to_tuner)
+
+        # ── Game settings → game panel (direct propagation) ──────
+        gsp.display_mode_changed.connect(self.game_panel.set_display_mode)
+        gsp.game_mode_changed.connect(self.game_panel.set_game_mode)
+        gsp.scale_direction_changed.connect(self.game_panel.set_scale_direction)
+        gsp.game_length_changed.connect(self.game_panel.set_game_length)
+        gsp.hold_duration_changed.connect(self.game_panel.set_hold_duration)
+        gsp.instrument_changed.connect(self.game_panel.set_instrument)
+        gsp.notation_changed.connect(self.game_panel.set_notation)
+
+        # ── Game audio widget → sync to main settings ────────────
+        gsp.audio.device_changed.connect(self._on_game_device_changed)
+        gsp.audio.threshold_changed.connect(self.game_coord.sync_threshold_from_game)
+        gsp.audio.buffer_changed.connect(self._on_game_buffer_changed)
 
     # ── audio manager callbacks ──────────────────────────────────
 
@@ -327,9 +317,11 @@ class NoteAnalyzerApp(QMainWindow):
 
     def _on_game_button(self) -> None:
         if self._view_stack.currentIndex() == 0:
+            device_names = self.audio.enumerate_devices()
             self.game_coord.switch_to_game(
                 self.audio.sample_rate,
-                tuner_full_analysis_active=self.audio.full_analysis_active)
+                tuner_full_analysis_active=self.audio.full_analysis_active,
+                device_names=device_names)
         else:
             self.game_coord.switch_to_tuner()
 
