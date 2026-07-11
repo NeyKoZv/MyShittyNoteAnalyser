@@ -1,29 +1,27 @@
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout)
+"""Main application window — thin orchestrator composing panels and managers.
+
+Refactored in Phase 3: audio logic → AudioStreamManager,
+settings propagation → PanelCoordinator, game → GameCoordinator.
+"""
+from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+                                QStackedWidget, QPushButton)
 from PyQt6.QtCore import QTimer
 
-import sounddevice as sd
-import threading
-import queue
-import numpy as np
-from collections import deque
-
-from constants import (INSTRUMENTS, NOTE_SHARP_LETTER, NOTE_SHARP_SOLFEGE,
-                       NOTE_FLAT_LETTER, NOTE_FLAT_SOLFEGE,
-                       COLOR_BG_DARK, COLOR_BG_DARKER,
-                       COLOR_ACCENT_PERFECT, COLOR_ACCENT_NICE,
-                       COLOR_ACCENT_GOOD, COLOR_ACCENT_BAD,
-                       NOTE_HISTORY_MAXLEN, DEFAULT_SAMPLE_RATE,
-                       DEFAULT_BLOCK_SIZE, APP_GEOMETRY,
-                       DEFAULT_NOTATION)
-from pitch_detector import detect_pitch, freq_to_midi
+from constants import (APP_GEOMETRY, DEFAULT_SAMPLE_RATE, DEFAULT_BLOCK_SIZE,
+                       NOTE_HISTORY_MAXLEN)
 from settings_panel import SettingsPanel
 from tuner_panel import TunerPanel
 from history_panel import HistoryPanel
 from info_panel import InfoPanel
+from game_panel import GamePanel
+from game_settings_panel import GameSettingsPanel
+from audio_stream_manager import AudioStreamManager
+from panel_coordinator import PanelCoordinator
+from game_coordinator import GameCoordinator
 
 
 class NoteAnalyzerApp(QMainWindow):
-    """Main application controller — wires audio capture to the UI panels."""
+    """Main application — creates panels, wires managers, handles shutdown."""
 
     def __init__(self):
         super().__init__()
@@ -46,47 +44,27 @@ class NoteAnalyzerApp(QMainWindow):
         main_layout.setContentsMargins(10, 5, 10, 5)
         main_layout.setSpacing(5)
 
-        # ── audio parameters ──────────────────────────────────────────
-        self.sample_rate: int = DEFAULT_SAMPLE_RATE
-        self.current_block_size: int = DEFAULT_BLOCK_SIZE
+        # ── managers ──────────────────────────────────────────────
+        self.audio = AudioStreamManager()
+        self.coordinator = None   # created after panels exist
+        self.game_coord = None    # created after panels exist
 
-        # ── state ─────────────────────────────────────────────────────
-        self.is_running: bool = False
-        self.audio_queue: queue.Queue = queue.Queue()
-        self.stream: sd.InputStream | None = None
-
-        # Thread-safe note history
-        self.note_history: deque = deque(maxlen=NOTE_HISTORY_MAXLEN)
-        self._history_lock = threading.Lock()
-
-        # GUI coalescing
-        self.update_pending: bool = False
-        self.pending_midi: float | None = None
-        self.pending_cents: float | None = None
-        self.pending_rms: float | None = None
-
-        # Last detected note (so notation change can refresh info bar)
-        self._last_midi: float | None = None
-        self._last_cents: float | None = None
-
-        # ── build UI ──────────────────────────────────────────────────
+        # ── build UI ──────────────────────────────────────────────
         self._create_panels(main_layout)
+
+        # ── wire audio manager callbacks ──────────────────────────
+        self.audio.on_rms = self._on_audio_rms
+        self.audio.on_pitch = self._on_audio_pitch
+        self.audio.on_history_updated = self._on_audio_history
+        self.audio.on_error = self._on_audio_error
+
+        # ── populate devices & start ──────────────────────────────
         self._populate_devices()
-
-
-        # Trigger OS microphone permission dialog after the window shows
         QTimer.singleShot(0, self._request_mic_permission)
+        QTimer.singleShot(500, self._start_rms_only)
 
-        # ── wire callbacks ────────────────────────────────────────────
-        self.settings_panel.set_start_stop_callback(self.toggle_analysis)
-        self.settings_panel.set_buffer_callback(self._on_buffer_changed)
-        self.settings_panel.set_device_callback(self._on_device_changed)
-        self.settings_panel.set_notation_callback(self._on_notation_changed)
-        self.settings_panel.set_quantize_callback(self._on_quantize_changed)
-        self.settings_panel.set_min_max_callback(self._on_min_max_changed)
-        self.settings_panel.set_reset_callback(self._on_reset)
-
-        self.current_block_size = self.settings_panel.get_buffer_size()
+        # ── wire panel signals ────────────────────────────────────
+        self._wire_panel_signals()
 
         # Push initial settings to the history panel
         self.history_panel.set_notation(self.settings_panel.get_notation())
@@ -95,12 +73,17 @@ class NoteAnalyzerApp(QMainWindow):
             self.settings_panel.get_min_midi(),
             self.settings_panel.get_max_midi())
 
-    # ── layout ───────────────────────────────────────────────────────
+    # ── layout ───────────────────────────────────────────────────
 
     def _create_panels(self, main_layout: QVBoxLayout) -> None:
-        """Build the panel layout: settings | tuner (top), history, info bar."""
+        """Build the panel layout with QStackedWidget for tuner↔game switching."""
 
-        # top row: settings + tuner
+        # ── Page 0: Tuner / Analyzer view ────────────────────────
+        tuner_view = QWidget()
+        tuner_layout = QVBoxLayout(tuner_view)
+        tuner_layout.setContentsMargins(0, 0, 0, 0)
+        tuner_layout.setSpacing(5)
+
         top_widget = QWidget()
         top_layout = QHBoxLayout(top_widget)
         top_layout.setContentsMargins(0, 0, 0, 0)
@@ -110,276 +93,253 @@ class NoteAnalyzerApp(QMainWindow):
 
         self.tuner_panel = TunerPanel()
         top_layout.addWidget(self.tuner_panel, stretch=0)
+        tuner_layout.addWidget(top_widget, stretch=0)
 
-        main_layout.addWidget(top_widget, stretch=0)
-
-        # history (middle, fills remaining space)
         self.history_panel = HistoryPanel()
-        self.history_panel.set_clear_callback(self._on_clear_history)
-        main_layout.addWidget(self.history_panel, stretch=1)
+        tuner_layout.addWidget(self.history_panel, stretch=1)
 
-        # info bar (bottom)
         self.info_panel = InfoPanel()
-        main_layout.addWidget(self.info_panel, stretch=0)
+        tuner_layout.addWidget(self.info_panel, stretch=0)
 
-    # ── device management ────────────────────────────────────────────
+        # ── Page 1: Game view ────────────────────────────────────
+        game_view = QWidget()
+        game_layout = QVBoxLayout(game_view)
+        game_layout.setContentsMargins(0, 0, 0, 0)
+        game_layout.setSpacing(8)
+
+        self.game_settings_panel = GameSettingsPanel()
+        game_layout.addWidget(self.game_settings_panel, stretch=0)
+
+        self.game_panel = GamePanel()
+        game_layout.addWidget(self.game_panel, stretch=1)
+
+        # ── Stacked widget ───────────────────────────────────────
+        self._view_stack = QStackedWidget()
+        self._view_stack.addWidget(tuner_view)   # index 0
+        self._view_stack.addWidget(game_view)     # index 1
+
+        main_layout.addWidget(self._view_stack, stretch=1)
+
+        # ── Game button bar ──────────────────────────────────────
+        btn_bar = QWidget()
+        btn_layout = QHBoxLayout(btn_bar)
+        btn_layout.setContentsMargins(0, 0, 0, 0)
+        btn_layout.addStretch()
+        self._game_btn = QPushButton("🎮  Play Game")
+        self._game_btn.setMinimumHeight(30)
+        self._game_btn.setMaximumWidth(150)
+        self._game_btn.setToolTip("Switch to Note Training Game mode")
+        self._game_btn.clicked.connect(self._on_game_button)
+        btn_layout.addWidget(self._game_btn)
+        main_layout.insertWidget(0, btn_bar)
+
+        # ── Create coordinators ──────────────────────────────────
+        self.coordinator = PanelCoordinator(
+            self.settings_panel, self.tuner_panel,
+            self.history_panel, self.info_panel,
+            self.game_panel, self.game_settings_panel)
+        self.game_coord = GameCoordinator(
+            self.settings_panel, self.game_panel,
+            self.game_settings_panel, self._view_stack, self._game_btn)
+
+        # ── Game coordinator callbacks ───────────────────────────
+        self.game_coord.enable_full_analysis_cb = self._enable_full_analysis
+        self.game_coord.disable_full_analysis_cb = self._disable_full_analysis
+        self.game_coord.restart_stream_cb = self._restart_audio_stream
+
+        # ── Wire game panel signals ──────────────────────────────
+        self.game_settings_panel.display_mode_callback = self.game_panel.set_display_mode
+        self.game_settings_panel.game_mode_callback = self.game_panel.set_game_mode
+        self.game_settings_panel.scale_direction_callback = self.game_panel.set_scale_direction
+        self.game_settings_panel.game_length_callback = self.game_panel.set_game_length
+        self.game_settings_panel.hold_duration_callback = self.game_panel.set_hold_duration
+        self.game_settings_panel.instrument_callback = self.game_panel.set_instrument
+        self.game_settings_panel.notation_callback = self.game_panel.set_notation
+
+        # Wire game's audio widget → sync to main settings
+        self.game_settings_panel._audio.device_callback = self._on_game_device_changed
+        self.game_settings_panel._audio.threshold_changed_callback = self.game_coord.sync_threshold_from_game
+        self.game_settings_panel._audio.buffer_callback = self._on_game_buffer_changed
+
+    # ── signal wiring ────────────────────────────────────────────
+
+    def _wire_panel_signals(self) -> None:
+        """Connect panel signals to coordinator methods."""
+        sp = self.settings_panel
+
+        # Settings panel
+        sp.set_start_stop_callback(self._toggle_analysis)
+        sp.set_buffer_callback(self._on_buffer_changed)
+        sp.set_device_callback(self._on_device_changed)
+        sp.set_notation_callback(self.coordinator.propagate_notation)
+        sp.set_quantize_callback(self.coordinator.propagate_quantize)
+        sp.set_min_max_callback(self.coordinator.propagate_range)
+        sp.set_reset_callback(self.coordinator.propagate_reset)
+
+        # ── sync audio-relevant settings to the audio manager in real-time ──
+        # These must be synced whenever changed, not just at analysis start,
+        # because the processing thread reads cached copies.
+        sp._instr_cb.currentTextChanged.connect(
+            lambda _: self._sync_audio_settings())
+        sp._audio.threshold_changed.connect(
+            lambda _v: self._sync_audio_settings())
+        sp._aubio_cb.toggled.connect(
+            lambda _: self._sync_audio_settings())
+        sp._continue_cb.toggled.connect(
+            lambda _: self._sync_audio_settings())
+
+        # History panel
+        self.history_panel.set_clear_callback(self._on_clear_history)
+
+        # Game settings → game coordinator
+        gsp = self.game_settings_panel
+        gsp.start_callback = self.game_coord.start_game
+        gsp.stop_callback = self.game_coord.stop_game
+        gsp.back_to_tuner_callback = self.game_coord.switch_to_tuner
+
+        # Game panel
+        self.game_panel.back_to_tuner_callback = self.game_coord.switch_to_tuner
+
+    # ── audio manager callbacks ──────────────────────────────────
+
+    def _on_audio_rms(self, rms: float) -> None:
+        """RMS level update → push to meters in both panels."""
+        self.coordinator.update_rms(rms)
+
+    def _on_audio_pitch(self, midi: float | None,
+                         cents: float | None) -> None:
+        """Pitch data → route to tuner or game based on active view."""
+        if self._view_stack.currentIndex() == 0:
+            self.coordinator.update_tuner(midi)
+            if midi is not None and cents is not None:
+                self.coordinator.update_info_bar(midi, cents)
+        self.coordinator.update_game(midi, cents)
+
+    def _on_audio_history(self, history_copy: list, used: int) -> None:
+        """History update → push to history panel."""
+        self.coordinator.update_history(history_copy, used)
+
+    def _on_audio_error(self, msg: str) -> None:
+        self.info_panel.show_error(msg)
+
+    # ── audio lifecycle ──────────────────────────────────────────
+
+    def _start_rms_only(self) -> None:
+        """Start audio streaming in RMS-only mode (live on launch)."""
+        try:
+            device_idx = self._get_device_index()
+            self.audio.start_stream(device_idx, self.audio.current_block_size,
+                                    self.audio.sample_rate)
+            self.settings_panel.set_button_text("▶  Start")
+        except Exception as e:
+            self.info_panel.show_error(str(e))
+
+    def _toggle_analysis(self) -> None:
+        """Toggle between full analysis and RMS-only mode."""
+        if self.audio.full_analysis_active:
+            self._disable_full_analysis()
+        else:
+            self._enable_full_analysis()
+
+    def _enable_full_analysis(self) -> None:
+        """Enable pitch detection + history."""
+        if not self.audio.is_running:
+            self._start_rms_only()
+        self.audio.enable_full_analysis()
+        self._sync_audio_settings()
+        self.settings_panel.set_button_text("⏹  Stop")
+
+    def _disable_full_analysis(self) -> None:
+        """Drop back to RMS-only."""
+        self.audio.disable_full_analysis()
+        self.settings_panel.set_button_text("▶  Start")
+
+    def _sync_audio_settings(self) -> None:
+        """Push current UI settings to the audio manager before processing."""
+        self.audio.noise_threshold = self.settings_panel.get_threshold()
+        self.audio.instrument_name = self.settings_panel.get_instrument()
+        self.audio.use_aubio = self.settings_panel.get_use_aubio()
+        self.audio.continue_on_silence = self.settings_panel.get_continue()
+
+    # ── device management ────────────────────────────────────────
 
     def _populate_devices(self) -> None:
-        devices = sd.query_devices()
-        self._device_name_to_index = {}
-        clean_names = []
-        for i, dev in enumerate(devices):
-            if dev['max_input_channels'] > 0:
-                name = dev['name']
-                self._device_name_to_index[name] = i
-                clean_names.append(name)
-        self.settings_panel.populate_devices(clean_names)
+        names = self.audio.enumerate_devices()
+        self.settings_panel.populate_devices(names)
         self._on_device_changed()
 
     def _get_device_index(self) -> int:
         selected = self.settings_panel.get_device()
-        idx = self._device_name_to_index.get(selected)
-        if idx is not None:
-            return idx
-        device = sd.default.device
-        return device[0] if isinstance(device, tuple) else device
+        return self.audio.get_device_index(selected)
 
     def _on_device_changed(self) -> None:
         device_idx = self._get_device_index()
-        try:
-            dev_info = sd.query_devices(device_idx)
-            sr = dev_info.get('default_samplerate', DEFAULT_SAMPLE_RATE)
-        except Exception:
-            sr = self.sample_rate
-        self.sample_rate = int(sr)
-        self.settings_panel.set_sample_rate(self.sample_rate)
-        if self.is_running:
-            self.stop_analysis()
-            self.start_analysis()
+        sr = self.audio.query_sample_rate(device_idx)
+        self.audio.sample_rate = int(sr)
+        self.settings_panel.set_sample_rate(self.audio.sample_rate)
+        if self.audio.is_running:
+            self._restart_audio_stream()
 
     def _on_buffer_changed(self, new_block_size: int) -> None:
-        self.current_block_size = int(new_block_size)
-        if self.is_running:
-            self.stop_analysis()
-            self.start_analysis()
+        self.audio.current_block_size = int(new_block_size)
+        if self.audio.is_running:
+            self._restart_audio_stream()
+
+    def _restart_audio_stream(self, buf_val: int | None = None) -> None:
+        """Restart the audio stream preserving full-analysis state."""
+        if buf_val is not None:
+            self.audio.current_block_size = buf_val
+        device_idx = self._get_device_index()
+        self.audio.restart_stream(device_idx, self.audio.current_block_size,
+                                  self.audio.sample_rate)
+        self._sync_audio_settings()
+        if self.audio.full_analysis_active:
+            self.settings_panel.set_button_text("⏹  Stop")
+        else:
+            self.settings_panel.set_button_text("▶  Start")
 
     def _request_mic_permission(self) -> None:
-        """Probe microphone in a background thread so the UI isn't blocked
-        if the OS shows a permission dialog."""
+        """Probe microphone in a background thread for OS permission dialog."""
         import threading
+
         def _probe():
             try:
                 idx = self._get_device_index()
-                probe = sd.InputStream(device=idx, channels=1,
-                                       samplerate=self.sample_rate, blocksize=512)
+                probe = __import__('sounddevice').InputStream(
+                    device=idx, channels=1,
+                    samplerate=self.audio.sample_rate, blocksize=512)
                 probe.start()
                 probe.stop()
                 probe.close()
             except Exception:
-                pass  # permission denied or no device — user will see error later
+                pass
         threading.Thread(target=_probe, daemon=True).start()
 
-    # ── callback handlers ────────────────────────────────────────────
+    # ── game → main audio sync ──────────────────────────────────
 
-    def _on_notation_changed(self) -> None:
-        notation = self.settings_panel.get_notation()
-        self.history_panel.set_notation(notation)
-        # Refresh the info bar immediately with the new notation
-        if self._last_midi is not None and self._last_cents is not None:
-            self._update_info_from_midi(self._last_midi, self._last_cents)
+    def _on_game_device_changed(self) -> None:
+        self.game_coord.sync_device_from_game()
 
-    def _on_quantize_changed(self) -> None:
-        self.history_panel.set_quantize(self.settings_panel.get_quantize())
+    def _on_game_buffer_changed(self, buf_val: int) -> None:
+        self.game_coord.sync_buffer_from_game(buf_val, self.audio.sample_rate)
 
-    def _on_min_max_changed(self) -> None:
-        min_midi = self.settings_panel.get_min_midi()
-        max_midi = self.settings_panel.get_max_midi()
-        self.tuner_panel.set_range(min_midi, max_midi)
-        self.history_panel.set_range(min_midi, max_midi)
+    # ── view switching ──────────────────────────────────────────
 
-    def _on_reset(self) -> None:
-        """Refresh all panels after a factory reset."""
-        self._on_notation_changed()
-        self._on_quantize_changed()
-        self._on_min_max_changed()
-        self.current_block_size = self.settings_panel.get_buffer_size()
-
-    # ── analysis lifecycle ───────────────────────────────────────────
-
-    def toggle_analysis(self) -> None:
-        if self.is_running:
-            self.stop_analysis()
+    def _on_game_button(self) -> None:
+        if self._view_stack.currentIndex() == 0:
+            self.game_coord.switch_to_game(
+                self.audio.sample_rate,
+                tuner_full_analysis_active=self.audio.full_analysis_active)
         else:
-            self.start_analysis()
+            self.game_coord.switch_to_tuner()
 
-    def start_analysis(self) -> None:
-        device_idx = self._get_device_index()
-        block_size = self.current_block_size
-        sr = self.sample_rate
-
-        try:
-            self.stream = sd.InputStream(
-                device=device_idx,
-                channels=1,
-                samplerate=sr,
-                blocksize=block_size,
-                callback=self.audio_callback,
-            )
-            self.stream.start()
-            self.is_running = True
-            self.settings_panel.set_button_text("⏹  Stop")
-            self.processing_thread = threading.Thread(
-                target=self.process_audio, daemon=True)
-            self.processing_thread.start()
-        except Exception as e:
-            self.info_panel.show_error(str(e))
-
-    def stop_analysis(self) -> None:
-        self.is_running = False
-        self.update_pending = False
-        self.pending_midi = None
-        if self.stream:
-            self.stream.stop()
-            self.stream.close()
-            self.stream = None
-        self.settings_panel.set_button_text("▶  Start")
-        while not self.audio_queue.empty():
-            try:
-                self.audio_queue.get_nowait()
-            except queue.Empty:
-                break
-
-    def audio_callback(self, indata, frames, time_info, status) -> None:
-        if status:
-            print("Audio status:", status)
-        self.audio_queue.put(indata.copy())
-
-    # ── audio processing (background thread) ─────────────────────────
-
-    def process_audio(self) -> None:
-        while self.is_running:
-            try:
-                data = self.audio_queue.get(timeout=0.1)
-            except queue.Empty:
-                continue
-            audio = data.flatten()
-
-            rms = np.sqrt(np.mean(audio ** 2))
-            threshold = self.settings_panel.get_threshold()
-            if rms < threshold:
-                if self.settings_panel.get_continue():
-                    with self._history_lock:
-                        self.note_history.append(None)
-                    self.schedule_gui_update(midi=None, rms=rms)
-                else:
-                    self.schedule_gui_update(midi=None, rms=rms)
-                continue
-
-            use_aubio = self.settings_panel.get_use_aubio()
-            freq = detect_pitch(audio, self.sample_rate, self.current_block_size,
-                                use_aubio=use_aubio)
-            if freq is None or freq <= 0:
-                continue
-
-            midi = freq_to_midi(freq)
-            if midi is None:
-                continue
-
-            instr = self.settings_panel.get_instrument()
-            offset = INSTRUMENTS.get(instr, 0)
-            midi_written = midi + offset
-            midi_rounded = round(midi_written)
-            cents = (midi_written - midi_rounded) * 100
-
-            with self._history_lock:
-                self.note_history.append((midi_written, cents))
-
-            self.schedule_gui_update(midi=midi_written, cents=cents, rms=rms)
-
-    # ── GUI coalescing ───────────────────────────────────────────────
-
-    def schedule_gui_update(self, midi: float | None = None,
-                             cents: float | None = None,
-                             rms: float | None = None) -> None:
-        if self.update_pending:
-            if midi is not None:
-                self.pending_midi = midi
-            if cents is not None:
-                self.pending_cents = cents
-            if rms is not None:
-                self.pending_rms = rms
-            return
-        self.pending_midi = midi
-        self.pending_cents = cents
-        self.pending_rms = rms
-        self.update_pending = True
-        QTimer.singleShot(0, self._perform_gui_update)
-
-    def _perform_gui_update(self) -> None:
-        self.update_pending = False
-        midi_to_use = self.pending_midi
-        cents = self.pending_cents
-        rms = self.pending_rms
-        self.pending_midi = None
-        self.pending_cents = None
-        self.pending_rms = None
-
-        self._update_tuner(midi_to_use)
-        if midi_to_use is not None and cents is not None:
-            self._last_midi = midi_to_use
-            self._last_cents = cents
-            self._update_info_from_midi(midi_to_use, cents)
-        if rms is not None:
-            self.settings_panel.set_rms_level(rms)
-        self._update_history()
-
-    # ── info / tuner / history helpers ───────────────────────────────
-
-    def _update_info_from_midi(self, midi_float: float, cents: float) -> None:
-        """Derive note name + accuracy from MIDI value, push to info panel."""
-        abs_cents = abs(cents)
-        if abs_cents < 5:
-            acc, color = "Perfect", COLOR_ACCENT_PERFECT
-        elif abs_cents < 20:
-            acc, color = "Nice", COLOR_ACCENT_NICE
-        elif abs_cents < 50:
-            acc, color = "Good", COLOR_ACCENT_GOOD
-        else:
-            acc, color = "Bad", COLOR_ACCENT_BAD
-
-        midi_rounded = round(midi_float)
-        note_idx = midi_rounded % 12
-        notation = self.settings_panel.get_notation()
-        use_sharps = notation == "Sharps"
-        letter = (NOTE_SHARP_LETTER if use_sharps else NOTE_FLAT_LETTER)[note_idx]
-        solfege = (NOTE_SHARP_SOLFEGE if use_sharps else NOTE_FLAT_SOLFEGE)[note_idx]
-
-        self.info_panel.update_info(solfege, letter, acc, color, cents)
-
-    def _update_tuner(self, midi_float: float | None) -> None:
-        self.tuner_panel.update_tuner(midi_float)
+    # ── history ─────────────────────────────────────────────────
 
     def _on_clear_history(self) -> None:
-        with self._history_lock:
-            self.note_history.clear()
-        self._update_history()
+        self.audio.clear_history()
 
-    def _update_history(self) -> None:
-        with self._history_lock:
-            history_copy = list(self.note_history)
-            used = len(self.note_history)
-        self.history_panel.set_history(history_copy)
-        self.info_panel.set_memory_usage(used, NOTE_HISTORY_MAXLEN)
-        quantize = self.settings_panel.get_quantize()
-        notation = self.settings_panel.get_notation()
-        if (not hasattr(self.history_panel, 'notation')
-                or self.history_panel.notation != notation):
-            self.history_panel.set_notation(notation)
-        if self.history_panel.quantize != quantize:
-            self.history_panel.set_quantize(quantize)
-
-    # ── shutdown ─────────────────────────────────────────────────────
+    # ── shutdown ─────────────────────────────────────────────────
 
     def closeEvent(self, event):
-        self.stop_analysis()
+        self.audio.stop_stream()
         event.accept()

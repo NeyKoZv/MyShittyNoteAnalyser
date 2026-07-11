@@ -17,9 +17,9 @@ INSTRUMENTS = {
     "A Clarinet": 3,
     "Eb Clarinet": -3,
     "Bb Trumpet": 2,
-    "Alto Sax (Eb)": 9,
-    "Tenor Sax (Bb)": 14,
-    "French Horn (F)": 7,
+    "Alto Sax": 9,
+    "Tenor Sax": 14,
+    "French Horn": 7,
     "Guitar": 0,
     "Bass Guitar": 0,
 }

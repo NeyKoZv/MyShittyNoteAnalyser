@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (QWidget, QGroupBox, QPushButton, QScrollBar,
                                 QVBoxLayout, QHBoxLayout)
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 
 from constants import (MIN_MIDI, MAX_MIDI, NOTE_SHARP_LETTER, NOTE_SHARP_SOLFEGE,
                        NOTE_FLAT_LETTER, NOTE_FLAT_SOLFEGE,
@@ -152,6 +152,9 @@ class _HistoryCanvas(QWidget):
 class HistoryPanel(QGroupBox):
     """Scrollable pitch-history view with a toolbar (Clear, Live)."""
 
+    # ── signals ──────────────────────────────────────────────────
+    clear_requested = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__("Pitch History", parent)
         self.setObjectName("HistoryPanel")
@@ -222,6 +225,7 @@ class HistoryPanel(QGroupBox):
         self._notes_canvas.update()
 
     def _on_clear(self) -> None:
+        self.clear_requested.emit()
         if self._clear_callback:
             self._clear_callback()
 
