@@ -1,9 +1,3 @@
-"""
-Panel coordinator — handles cross-panel settings propagation and UI updates
-that were previously inlined in NoteAnalyzerApp.
-
-Extracted from gui.py as part of Phase 3 refactoring.
-"""
 from MyShittyNoteAnalyser.constants import NOTE_HISTORY_MAXLEN
 from MyShittyNoteAnalyser.note_utils import midi_to_note_text, cents_to_accuracy
 

@@ -15,10 +15,9 @@ from PyQt6.QtWidgets import (QWidget, QLabel, QVBoxLayout)
 from PyQt6.QtGui import QFont
 from PyQt6.QtCore import Qt, pyqtSignal
 
-from MyShittyNoteAnalyser.constants import (MIN_MIDI, MAX_MIDI)
 from MyShittyNoteAnalyser.game_constants import (
     GAME_BG, GAME_NOTEHEAD,
-    GAME_TARGET_TEXT, GAME_CORRECT, GAME_WRONG,
+    GAME_TARGET_TEXT, GAME_CORRECT, GAME_WRONG, GAME_PITCH_HINT,
     GAME_FEEDBACK_BG, GAME_STATS,
     GAME_TOP_BAR_HEIGHT, GAME_FEEDBACK_HEIGHT,
     GAME_HOLD_BAR_HEIGHT, GAME_CURRENT_NOTE_HEIGHT,
@@ -28,7 +27,8 @@ from MyShittyNoteAnalyser.game_constants import (
 from MyShittyNoteAnalyser.instrument_notation import (
     DEFAULT_CLEF,
     get_clef_for_instrument,
-    get_written_range_for_instrument,
+    get_midi_notes_for_categories,
+    DEFAULT_ENABLED_CATEGORIES,
 )
 from MyShittyNoteAnalyser.note_utils import midi_to_note_text, cents_to_color
 from MyShittyNoteAnalyser.hold_progress_bar import HoldProgressBar
@@ -53,7 +53,8 @@ class GamePanel(QWidget):
 
         # ── state ────────────────────────────────────────────────
         self._game_active = False
-        self._display_mode = "Letter (Solfege)"
+        self._show_letter = True
+        self._show_staff = False
         self._game_mode = "Random"
         self._scale_direction = "Ascending"
         self._game_length = "10 notes"
@@ -62,8 +63,7 @@ class GamePanel(QWidget):
         self._notation = "Flats"
         self._clef = DEFAULT_CLEF
         self._instrument = "Concert (C)"
-        self._min_midi = MIN_MIDI
-        self._max_midi = MAX_MIDI
+        self._enabled_range_categories: set[str] = set(DEFAULT_ENABLED_CATEGORIES)
 
         self._target_midi = 60
         self._hold_timer = 0.0
@@ -78,6 +78,7 @@ class GamePanel(QWidget):
         self._last_correct_midi: int | None = None
         self._current_midi: float | None = None
         self._current_cents: float | None = None
+        self._show_pitch_hint: bool = True
 
         # ── build UI ─────────────────────────────────────────────
         self._build_ui()
@@ -101,6 +102,10 @@ class GamePanel(QWidget):
         ds_layout = QVBoxLayout(self._display_stack)
         ds_layout.setContentsMargins(0, 0, 0, 0)
 
+        # Staff mode canvas (shown on top)
+        self._staff_canvas = StaffCanvas(self._display_stack)
+        ds_layout.addWidget(self._staff_canvas)
+
         # Text mode label
         self._target_label = QLabel("Do (C4)")
         self._target_label.setFont(QFont("Helvetica", 48, QFont.Weight.Bold))
@@ -109,9 +114,13 @@ class GamePanel(QWidget):
                                           f"background-color: {GAME_BG};")
         ds_layout.addWidget(self._target_label)
 
-        # Staff mode canvas
-        self._staff_canvas = StaffCanvas(self._display_stack)
-        ds_layout.addWidget(self._staff_canvas)
+        # Direction hint label (arrow ↑/↓ — only visible in letter mode)
+        self._hint_label = QLabel("")
+        self._hint_label.setFont(QFont("Helvetica", 16, QFont.Weight.Bold))
+        self._hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._hint_label.setStyleSheet(
+            f"color: {GAME_PITCH_HINT}; background-color: {GAME_BG};")
+        ds_layout.addWidget(self._hint_label)
 
         self._update_display_mode_ui()
         main_layout.addWidget(self._display_stack, stretch=1)
@@ -153,9 +162,10 @@ class GamePanel(QWidget):
     # ── display mode toggle ───────────────────────────────────────
 
     def _update_display_mode_ui(self) -> None:
-        is_letter = self._display_mode == "Letter (Solfege)"
-        self._target_label.setVisible(is_letter)
-        self._staff_canvas.setVisible(not is_letter)
+        """Show/hide letter and staff displays based on checkbox state."""
+        self._target_label.setVisible(self._show_letter)
+        self._hint_label.setVisible(self._show_letter)
+        self._staff_canvas.setVisible(self._show_staff)
 
     # ── game lifecycle ────────────────────────────────────────────
 
@@ -188,6 +198,8 @@ class GamePanel(QWidget):
         self._update_target_display()
         self._hold_bar.reset()
         self._current_label.setText("Waiting for note...")
+        self._hint_label.setText("")
+        self._staff_canvas.set_current_pitch(None)
         self._feedback_label.setText("")
         self._overlay.hide_overlay()
 
@@ -218,6 +230,8 @@ class GamePanel(QWidget):
             self._current_midi = None
             self._current_cents = None
             self._current_label.setText("Silence...")
+            self._hint_label.setText("")
+            self._staff_canvas.set_current_pitch(None)
             return
 
         self._current_midi = midi_float
@@ -231,6 +245,21 @@ class GamePanel(QWidget):
         self._current_label.setText(
             f"<span style='color: {col};'>"
             f"Playing: {solf} ({letter})  {c:+.1f}¢</span>")
+
+        # Update staff canvas with current pitch for the indicator dot
+        self._staff_canvas.set_current_pitch(midi_float)
+
+        # Direction hint (arrow) for letter mode
+        if self._show_pitch_hint:
+            diff_semitones = midi_float - self._target_midi
+            if abs(diff_semitones) * 100.0 <= MATCH_TOLERANCE_CENTS:
+                self._hint_label.setText("")
+            elif diff_semitones < 0:
+                self._hint_label.setText("▲  Play higher")
+            else:
+                self._hint_label.setText("▼  Play lower")
+        else:
+            self._hint_label.setText("")
 
         # Check against target
         target = self._target_midi
@@ -289,17 +318,11 @@ class GamePanel(QWidget):
         self._update_target_display()
 
     def _pick_next_target(self) -> None:
-        """Pick the next target note based on game mode and instrument range."""
-        # Determine the available MIDI range for display
-        # 1) User-custom range (if different from app defaults) takes priority
-        if self._min_midi != MIN_MIDI or self._max_midi != MAX_MIDI:
-            low = self._min_midi
-            high = self._max_midi
-        else:
-            # 2) Use the instrument's written range
-            low, high = get_written_range_for_instrument(self._instrument)
-
-        available = list(range(low, high + 1))
+        """Pick the next target note based on game mode and enabled range
+        categories for the current instrument.
+        """
+        available = get_midi_notes_for_categories(
+            self._instrument, self._enabled_range_categories)
         if not available:
             available = [60]
 
@@ -307,6 +330,8 @@ class GamePanel(QWidget):
             self._target_midi = random.choice(available)
         else:
             # Scale mode
+            low = available[0]
+            high = available[-1]
             direction = self._scale_direction
             if direction == "Random":
                 direction = random.choice(["Ascending", "Descending"])
@@ -322,7 +347,6 @@ class GamePanel(QWidget):
                 next_midi = self._last_correct_midi + 1
                 if next_midi > high:
                     if self._total_notes == 0 or self._notes_captured < self._total_notes - 1:
-                        # Wrap around
                         next_midi = low
                     else:
                         next_midi = high
@@ -333,6 +357,12 @@ class GamePanel(QWidget):
                         next_midi = high
                     else:
                         next_midi = low
+
+            # Ensure the chosen note is in the available set
+            if next_midi not in available:
+                # Find the closest available note
+                closest = min(available, key=lambda x: abs(x - next_midi))
+                next_midi = closest
 
             self._target_midi = next_midi
 
@@ -373,8 +403,9 @@ class GamePanel(QWidget):
 
     # ── setters for external configuration ─────────────────────────
 
-    def set_display_mode(self, mode: str) -> None:
-        self._display_mode = mode
+    def set_display_mode(self, show_letter: bool, show_staff: bool) -> None:
+        self._show_letter = show_letter
+        self._show_staff = show_staff
         self._update_display_mode_ui()
 
     def set_game_mode(self, mode: str) -> None:
@@ -390,6 +421,13 @@ class GamePanel(QWidget):
         self._hold_duration = duration
         self._hold_bar.set_hold_duration(duration)
 
+    def set_show_pitch_hint(self, show: bool) -> None:
+        """Enable/disable pitch-hint arrows (letter mode) and staff dot."""
+        self._show_pitch_hint = show
+        self._staff_canvas.set_show_pitch_hint(show)
+        if not show:
+            self._hint_label.setText("")
+
     def set_notation(self, notation: str) -> None:
         self._notation = notation
         self._use_sharps = (notation == "Sharps")
@@ -402,12 +440,30 @@ class GamePanel(QWidget):
         self._staff_canvas.set_clef(self._clef)
 
     def set_range(self, min_midi: int, max_midi: int) -> None:
-        self._min_midi = min_midi
-        self._max_midi = max_midi
-        # If target is outside range, repick
-        if self._target_midi < min_midi or self._target_midi > max_midi:
+        """.. deprecated::
+        Prefer :meth:`set_enabled_range_categories`.  Kept for backward
+        compatibility with existing coordinator code.
+        """
+        # No-op: the category system supersedes the simple min/max range.
+        pass
+
+    def set_enabled_range_categories(self, categories: set[str]) -> None:
+        """Set which range categories are active for note selection.
+
+        *categories* should be a subset of
+        :data:`~MyShittyNoteAnalyser.instrument_notation.RANGE_CATEGORY_KEYS`.
+        """
+        self._enabled_range_categories = set(categories)
+        # Repick if the current target falls outside the new allowed set
+        available = get_midi_notes_for_categories(
+            self._instrument, self._enabled_range_categories)
+        if available and self._target_midi not in available:
             self._pick_next_target()
             self._update_target_display()
+
+    def get_enabled_range_categories(self) -> set[str]:
+        """Return the currently enabled range categories."""
+        return set(self._enabled_range_categories)
 
     def set_clef(self, clef: str) -> None:
         self._clef = clef

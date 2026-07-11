@@ -1,5 +1,3 @@
-"""Musical staff canvas widget — paints clef and target notehead."""
-
 import os
 
 from PyQt6.QtWidgets import QWidget
@@ -8,7 +6,7 @@ from PyQt6.QtCore import Qt, QRectF
 from PyQt6.QtSvg import QSvgRenderer
 
 from MyShittyNoteAnalyser.game_constants import (GAME_BG, GAME_STAFF_LINE, GAME_NOTEHEAD,
-                                                 GAME_NOTEHEAD_OUTLINE,
+                                                 GAME_NOTEHEAD_OUTLINE, GAME_PITCH_HINT,
                                                  STAFF_LINE_COUNT, STAFF_LINE_SPACING,
                                                  STAFF_TOTAL_HEIGHT,
                                                  STAFF_MARGIN_TOP, STAFF_MARGIN_BOTTOM,
@@ -32,6 +30,8 @@ class StaffCanvas(QWidget):
 
         self._target_midi: int = 60  # middle C
         self._clef: str = "treble"
+        self._current_midi: float | None = None   # user's current pitch
+        self._show_pitch_hint: bool = True        # settable from settings
 
         # SVG renderers (loaded lazily)
         self._treble_renderer: QSvgRenderer | None = None
@@ -52,6 +52,16 @@ class StaffCanvas(QWidget):
 
     def set_clef(self, clef: str) -> None:
         self._clef = clef
+        self.update()
+
+    def set_current_pitch(self, midi: float | None) -> None:
+        """Show a dot at the user's currently detected pitch (or clear it)."""
+        self._current_midi = midi
+        self.update()
+
+    def set_show_pitch_hint(self, show: bool) -> None:
+        """Enable or disable the pitch-hint dot on the staff."""
+        self._show_pitch_hint = show
         self.update()
 
     def paintEvent(self, event):
@@ -140,6 +150,21 @@ class StaffCanvas(QWidget):
         p.setBrush(QColor(GAME_NOTEHEAD))
         p.drawEllipse(QRectF(-rw, -rh, 2 * rw, 2 * rh))
         p.restore()
+
+        # ── current-pitch hint dot (yellow, offset right of target) ──
+        if (self._show_pitch_hint
+                and self._current_midi is not None
+                and self._current_midi > 0):
+            cur_y = midi_to_staff_y(self._current_midi, bottom_line_midi,
+                                     staff_top, staff_bottom)
+            hint_r = 5
+            # Place the dot to the right of the target notehead
+            hint_x = note_x_center + NOTEHEAD_WIDTH // 2 + 14
+            hint_y = int(cur_y)
+            p.setPen(QPen(QColor(GAME_PITCH_HINT), 1.5))
+            p.setBrush(QColor(GAME_PITCH_HINT))
+            p.drawEllipse(hint_x - hint_r, hint_y - hint_r,
+                          2 * hint_r, 2 * hint_r)
 
         p.end()
 

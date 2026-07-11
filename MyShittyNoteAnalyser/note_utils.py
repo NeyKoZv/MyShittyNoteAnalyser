@@ -1,5 +1,3 @@
-"""Shared note-display helper functions used by both tuner and game panels."""
-
 import os
 
 from MyShittyNoteAnalyser.constants import (NOTE_SHARP_SOLFEGE, NOTE_SHARP_LETTER,

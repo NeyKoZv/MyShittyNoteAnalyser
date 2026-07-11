@@ -1,5 +1,3 @@
-"""Application-wide stylesheet and color constants."""
-
 from PyQt6.QtWidgets import QLabel
 
 from MyShittyNoteAnalyser.constants import (COLOR_BG_DARK, COLOR_BG_DARKER, COLOR_BG_INPUT,

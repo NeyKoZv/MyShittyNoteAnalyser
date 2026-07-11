@@ -41,12 +41,11 @@ class GameCoordinator:
 
         notation = self.settings_panel.get_notation()
         instrument = self.settings_panel.get_instrument()
-        min_midi = self.settings_panel.get_min_midi()
-        max_midi = self.settings_panel.get_max_midi()
 
         self.game_panel.set_notation(notation)
         self.game_panel.set_instrument(instrument)
-        self.game_panel.set_range(min_midi, max_midi)
+        self.game_panel.set_enabled_range_categories(
+            self.game_settings_panel.get_enabled_range_categories())
         self.game_settings_panel.set_clef(instrument)
         self.game_settings_panel.set_notation(notation)
 
@@ -66,8 +65,8 @@ class GameCoordinator:
         self.game_settings_panel.set_buffer_display(buf_display)
 
         # Sync game panel settings from game settings panel
-        self.game_panel.set_display_mode(
-            self.game_settings_panel.get_display_mode())
+        show_letter, show_staff = self.game_settings_panel.get_display_mode()
+        self.game_panel.set_display_mode(show_letter, show_staff)
         self.game_panel.set_game_mode(
             self.game_settings_panel.get_game_mode())
         self.game_panel.set_scale_direction(
@@ -76,6 +75,8 @@ class GameCoordinator:
             self.game_settings_panel.get_game_length())
         self.game_panel.set_hold_duration(
             self.game_settings_panel.get_hold_duration())
+        self.game_panel.set_show_pitch_hint(
+            self.game_settings_panel.get_show_pitch_hint())
 
         self._view_stack.setCurrentIndex(1)
         self._game_btn.setText("🔬  Back to Tuner")

@@ -7,11 +7,15 @@ requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.23,<3",
     "PyQt6>=6.11.0,<7",
-    "sounddevice>=0.5.5,<0.6",
+    "sounddevice>=0.5.5,<0.6", "partitura>=1.9.0,<2", "musescore>=0.0.2,<0.0.3", "beautifulsoup4>=4.15.0,<5", "lilypond>=2.25.12,<3",
 ]
 
 [project.optional-dependencies]
 aubio = ["aubio"]
+
+# For engraved-quality staff notation in the game, install MuseScore 4
+# (https://musescore.org) or LilyPond (https://lilypond.org).
+# The game falls back to built-in drawing if neither is found.
 
 [project.scripts]
 MyShittyNoteAnalyser = "MyShittyNoteAnalyser.main:main"
@@ -38,6 +42,10 @@ pyqt6 = ">=6.11.0,<7"
 aubio = "*"
 portaudio = ">=19.7.0,<20"
 pytest = ">=9.1.1,<10"
+selenium = ">=4.45.0,<5"
+cairosvg = ">=2.9.0,<3"
+tqdm = ">=4.68.4,<5"
+requests = ">=2.34.2,<3"
 
 [tool.pixi.tasks]
 

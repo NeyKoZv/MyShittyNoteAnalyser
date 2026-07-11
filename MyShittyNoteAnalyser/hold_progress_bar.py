@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import QWidget
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QLinearGradient, QBrush
 from PyQt6.QtCore import Qt, QRectF
 
-from game_constants import (GAME_HOLD_PROGRESS, GAME_HOLD_EMPTY,
+from MyShittyNoteAnalyser.game_constants import (GAME_HOLD_PROGRESS, GAME_HOLD_EMPTY,
                             GAME_HOLD_TEXT, GAME_HOLD_BAR_HEIGHT,
                             HOLD_DURATION_DEFAULT)
 

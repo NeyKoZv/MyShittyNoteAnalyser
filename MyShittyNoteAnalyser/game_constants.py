@@ -5,11 +5,12 @@ Colours that duplicate the tuner palette are re-exported from ``constants``
 so there is a single source of truth for each hex value.
 """
 from MyShittyNoteAnalyser.constants import (COLOR_BG_DARKER, COLOR_FG_LABEL,
-                       COLOR_ACCENT_PERFECT, COLOR_ACCENT_BAD)
+                                            COLOR_ACCENT_PERFECT, COLOR_ACCENT_BAD)
 
 # ── Display modes ──────────────────────────────────────────────────
-GAME_DISPLAY_MODES = ["Letter (Solfege)", "Staff Notation"]
-DEFAULT_DISPLAY_MODE = "Letter (Solfege)"
+GAME_DISPLAY_OPTIONS = ["Letter (Solfege)", "Staff Notation"]
+DEFAULT_DISPLAY_LETTER = True
+DEFAULT_DISPLAY_STAFF = False
 
 # ── Game modes ─────────────────────────────────────────────────────
 GAME_MODES = ["Random", "Scale"]
@@ -18,6 +19,16 @@ DEFAULT_GAME_MODE = "Random"
 # ── Scale direction (used when game mode is "Scale") ───────────────
 SCALE_DIRECTIONS = ["Ascending", "Descending", "Random"]
 DEFAULT_SCALE_DIRECTION = "Ascending"
+
+# ── Range categories ───────────────────────────────────────────────
+# These correspond to the keys in INSTRUMENT_RANGE_CATEGORIES.
+RANGE_CATEGORY_LABELS = {
+    "most_played":        "Most played",
+    "rarely_played":      "Rarely played",
+    "very_rarely_played": "Very rarely played",
+}
+# Display order (left to right in settings panel).
+RANGE_CATEGORY_ORDER = ("most_played", "rarely_played", "very_rarely_played")
 
 # ── Game lengths ───────────────────────────────────────────────────
 GAME_LENGTHS = ["Endless", "10 notes", "20 notes", "30 notes"]
@@ -63,6 +74,7 @@ GAME_OVERLAY_BG = "rgba(0, 0, 0, 0.85)"
 GAME_TARGET_TEXT = "#ffffff"               # target note in letter mode
 GAME_CORRECT = COLOR_ACCENT_PERFECT        # "#00ff88"
 GAME_WRONG = COLOR_ACCENT_BAD             # "#ff5555"
+GAME_PITCH_HINT = "#ffcc00"               # amber/yellow — current pitch dot + arrow
 GAME_FEEDBACK_BG = "#222222"
 GAME_STATS = COLOR_FG_LABEL               # "#cccccc"
 

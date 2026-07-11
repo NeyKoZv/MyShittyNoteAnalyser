@@ -5,8 +5,8 @@ from PyQt6.QtGui import QPainter, QColor, QPen, QFont
 from PyQt6.QtCore import Qt, QRectF
 
 from MyShittyNoteAnalyser.game_constants import (GAME_OVERLAY_WIDTH, GAME_OVERLAY_HEIGHT,
-                            GAME_OVERLAY_CORNER_RADIUS,
-                            GAME_CORRECT, GAME_STATS)
+                                                 GAME_OVERLAY_CORNER_RADIUS,
+                                                 GAME_CORRECT, GAME_STATS)
 
 
 class GameOverlay(QWidget):
@@ -14,7 +14,6 @@ class GameOverlay(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setVisible(False)
         self._score = 0
         self._streak = 0
         self._best_streak = 0
@@ -23,6 +22,21 @@ class GameOverlay(QWidget):
         self._is_endless = False
         self.play_again_callback = None
         self.back_callback = None
+
+        # ── Create buttons eagerly so resizeEvent always has them ──
+        # Must be created *before* any setVisible call to avoid hideEvent
+        # firing while _play_btn / _back_btn don't exist yet.
+        self._play_btn = QPushButton("Play Again", self)
+        self._play_btn.setFixedSize(140, 36)
+        self._play_btn.setVisible(False)
+        self._play_btn.clicked.connect(self._on_play_again)
+
+        self._back_btn = QPushButton("Back to Tuner", self)
+        self._back_btn.setFixedSize(140, 36)
+        self._back_btn.setVisible(False)
+        self._back_btn.clicked.connect(self._on_back)
+
+        self.setVisible(False)
 
     def show_summary(self, score: int, streak: int, best_streak: int,
                      notes_captured: int, total_notes: int,
@@ -96,7 +110,7 @@ class GameOverlay(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # Reposition buttons
+        # Reposition buttons — always safe, created eagerly in __init__
         w = self.width()
         card_x = (w - GAME_OVERLAY_WIDTH) // 2
         card_y = (self.height() - GAME_OVERLAY_HEIGHT) // 2
@@ -106,20 +120,8 @@ class GameOverlay(QWidget):
         btn_start_x = card_x + (GAME_OVERLAY_WIDTH - total_btn_w) // 2
         btn_y = card_y + GAME_OVERLAY_HEIGHT - 55
 
-        if hasattr(self, '_play_btn'):
-            self._play_btn.move(btn_start_x, btn_y)
-        if hasattr(self, '_back_btn'):
-            self._back_btn.move(btn_start_x + btn_w + 20, btn_y)
-
-    def _ensure_buttons(self) -> None:
-        if not hasattr(self, '_play_btn'):
-            self._play_btn = QPushButton("Play Again", self)
-            self._play_btn.setFixedSize(140, 36)
-            self._play_btn.clicked.connect(self._on_play_again)
-        if not hasattr(self, '_back_btn'):
-            self._back_btn = QPushButton("Back to Tuner", self)
-            self._back_btn.setFixedSize(140, 36)
-            self._back_btn.clicked.connect(self._on_back)
+        self._play_btn.move(btn_start_x, btn_y)
+        self._back_btn.move(btn_start_x + btn_w + 20, btn_y)
 
     def _on_play_again(self) -> None:
         if self.play_again_callback:
@@ -131,7 +133,6 @@ class GameOverlay(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        self._ensure_buttons()
         self._play_btn.setVisible(True)
         self._back_btn.setVisible(True)
         self._play_btn.raise_()
@@ -139,7 +140,5 @@ class GameOverlay(QWidget):
 
     def hideEvent(self, event):
         super().hideEvent(event)
-        if hasattr(self, '_play_btn'):
-            self._play_btn.setVisible(False)
-        if hasattr(self, '_back_btn'):
-            self._back_btn.setVisible(False)
+        self._play_btn.setVisible(False)
+        self._back_btn.setVisible(False)

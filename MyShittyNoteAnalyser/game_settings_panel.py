@@ -3,23 +3,26 @@ Game-mode settings panel — instrument, notation, display mode, game mode,
 scale direction, round length, hold duration, audio, and start/stop controls.
 """
 from PyQt6.QtWidgets import (QGroupBox, QLabel, QComboBox, QDoubleSpinBox,
-                               QPushButton, QVBoxLayout, QGridLayout)
+                               QCheckBox, QPushButton, QWidget,
+                               QVBoxLayout, QHBoxLayout, QGridLayout)
 from PyQt6.QtCore import Qt, pyqtSignal
 
 from MyShittyNoteAnalyser.constants import (INSTRUMENTS, DEFAULT_INSTRUMENT,
                        NOTATION_OPTIONS, DEFAULT_NOTATION)
 from MyShittyNoteAnalyser.game_constants import (
-    GAME_DISPLAY_MODES, DEFAULT_DISPLAY_MODE,
+    GAME_DISPLAY_OPTIONS, DEFAULT_DISPLAY_LETTER, DEFAULT_DISPLAY_STAFF,
     GAME_MODES, DEFAULT_GAME_MODE,
     SCALE_DIRECTIONS, DEFAULT_SCALE_DIRECTION,
     GAME_LENGTHS, DEFAULT_GAME_LENGTH,
     HOLD_DURATION_MIN, HOLD_DURATION_MAX,
     HOLD_DURATION_DEFAULT, HOLD_DURATION_STEP,
+    RANGE_CATEGORY_LABELS, RANGE_CATEGORY_ORDER,
 )
 from MyShittyNoteAnalyser.instrument_notation import (
     DEFAULT_CLEF,
     get_clef_for_instrument,
     resolve_notation_on_instrument_change,
+    DEFAULT_ENABLED_CATEGORIES,
 )
 from MyShittyNoteAnalyser.audio_settings_widget import AudioSettingsWidget
 from MyShittyNoteAnalyser.theme import section_header
@@ -31,7 +34,7 @@ class GameSettingsPanel(QGroupBox):
     # ── signals ──────────────────────────────────────────────────
     start_requested = pyqtSignal()
     stop_requested = pyqtSignal()
-    display_mode_changed = pyqtSignal(str)
+    display_mode_changed = pyqtSignal(bool, bool)
     game_mode_changed = pyqtSignal(str)
     scale_direction_changed = pyqtSignal(str)
     game_length_changed = pyqtSignal(str)
@@ -39,6 +42,8 @@ class GameSettingsPanel(QGroupBox):
     instrument_changed = pyqtSignal(str)
     notation_changed = pyqtSignal(str)
     back_to_tuner = pyqtSignal()
+    pitch_hint_changed = pyqtSignal(bool)
+    range_categories_changed = pyqtSignal(set)
 
     def __init__(self, parent=None):
         super().__init__("Game Settings", parent)
@@ -136,13 +141,22 @@ class GameSettingsPanel(QGroupBox):
         self._direction_cb.setVisible(False)
         r += 1
 
-        # Display mode
+        # Display mode — independent checkboxes (choose any combination)
         grid.addWidget(QLabel("Display:"), r, 0)
-        self._display_cb = QComboBox()
-        self._display_cb.addItems(GAME_DISPLAY_MODES)
-        self._display_cb.setCurrentText(DEFAULT_DISPLAY_MODE)
-        self._display_cb.currentTextChanged.connect(self._on_display_changed)
-        grid.addWidget(self._display_cb, r, 1)
+        display_widget = QWidget()
+        display_layout = QHBoxLayout(display_widget)
+        display_layout.setContentsMargins(0, 0, 0, 0)
+        display_layout.setSpacing(10)
+        self._display_letter_cb = QCheckBox(GAME_DISPLAY_OPTIONS[0])
+        self._display_letter_cb.setChecked(DEFAULT_DISPLAY_LETTER)
+        self._display_letter_cb.toggled.connect(self._on_display_changed)
+        display_layout.addWidget(self._display_letter_cb)
+        self._display_staff_cb = QCheckBox(GAME_DISPLAY_OPTIONS[1])
+        self._display_staff_cb.setChecked(DEFAULT_DISPLAY_STAFF)
+        self._display_staff_cb.toggled.connect(self._on_display_changed)
+        display_layout.addWidget(self._display_staff_cb)
+        display_layout.addStretch()
+        grid.addWidget(display_widget, r, 1)
         r += 1
 
         # Game length
@@ -165,6 +179,31 @@ class GameSettingsPanel(QGroupBox):
         grid.addWidget(self._hold_spin, r, 1)
         r += 1
 
+        # Pitch hints toggle
+        self._hint_cb = QCheckBox("Show pitch hints (arrow / staff dot)")
+        self._hint_cb.setChecked(True)
+        self._hint_cb.toggled.connect(self._on_pitch_hint_changed)
+        grid.addWidget(self._hint_cb, r, 0, 1, 2)
+        r += 1
+
+        # Range category toggles
+        grid.addWidget(QLabel("Train ranges:"), r, 0)
+        self._range_checkboxes: dict[str, QCheckBox] = {}
+        range_widget = QWidget()
+        range_layout = QHBoxLayout(range_widget)
+        range_layout.setContentsMargins(0, 0, 0, 0)
+        range_layout.setSpacing(8)
+        for key in RANGE_CATEGORY_ORDER:
+            label = RANGE_CATEGORY_LABELS.get(key, key)
+            cb = QCheckBox(label)
+            cb.setChecked(key in DEFAULT_ENABLED_CATEGORIES)
+            cb.toggled.connect(self._on_range_category_changed)
+            self._range_checkboxes[key] = cb
+            range_layout.addWidget(cb)
+        range_layout.addStretch()
+        grid.addWidget(range_widget, r, 1)
+        r += 1
+
         return r
 
     def _add_buttons(self, grid: QGridLayout, r: int) -> None:
@@ -183,8 +222,10 @@ class GameSettingsPanel(QGroupBox):
 
     # ── signal handlers ─────────────────────────────────────────────
 
-    def _on_display_changed(self, text: str) -> None:
-        self.display_mode_changed.emit(text)
+    def _on_display_changed(self) -> None:
+        self.display_mode_changed.emit(
+            self._display_letter_cb.isChecked(),
+            self._display_staff_cb.isChecked())
 
     def _on_notation_changed(self, text: str) -> None:
         self.notation_changed.emit(text)
@@ -227,6 +268,13 @@ class GameSettingsPanel(QGroupBox):
             self.stop_requested.emit()
         self.back_to_tuner.emit()
 
+    def _on_pitch_hint_changed(self, checked: bool) -> None:
+        self.pitch_hint_changed.emit(checked)
+
+    def _on_range_category_changed(self) -> None:
+        enabled = self.get_enabled_range_categories()
+        self.range_categories_changed.emit(enabled)
+
     # ── public API ──────────────────────────────────────────────────
 
     def set_game_running(self, active: bool) -> None:
@@ -258,8 +306,10 @@ class GameSettingsPanel(QGroupBox):
     def get_instrument(self) -> str:
         return self._instr_cb.currentText()
 
-    def get_display_mode(self) -> str:
-        return self._display_cb.currentText()
+    def get_display_mode(self) -> tuple[bool, bool]:
+        """Return (show_letter, show_staff) tuple."""
+        return (self._display_letter_cb.isChecked(),
+                self._display_staff_cb.isChecked())
 
     def get_game_mode(self) -> str:
         return self._mode_cb.currentText()
@@ -275,6 +325,15 @@ class GameSettingsPanel(QGroupBox):
 
     def get_notation(self) -> str:
         return self._notation_cb.currentText()
+
+    def get_show_pitch_hint(self) -> bool:
+        """Return whether pitch-hint arrows/staff dot are enabled."""
+        return self._hint_cb.isChecked()
+
+    def get_enabled_range_categories(self) -> set[str]:
+        """Return the set of range-category keys currently checked."""
+        return {key for key, cb in self._range_checkboxes.items()
+                if cb.isChecked()}
 
     # ── audio delegates ─────────────────────────────────────────────
 

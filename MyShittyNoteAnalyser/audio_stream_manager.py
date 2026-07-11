@@ -64,7 +64,9 @@ class AudioStreamManager(QObject):
         self.note_history: deque = deque(maxlen=NOTE_HISTORY_MAXLEN)
         self._history_lock = threading.Lock()
 
-        # GUI coalescing
+        # GUI coalescing — lock protects update_pending + pending_* values
+        # so that the audio thread and main thread never race on reads/writes.
+        self._coalesce_lock = threading.Lock()
         self.update_pending: bool = False
         self.pending_midi: float | None = None
         self.pending_cents: float | None = None
@@ -263,30 +265,37 @@ class AudioStreamManager(QObject):
     def _schedule_gui_update(self, midi: float | None = None,
                               cents: float | None = None,
                               rms: float | None = None) -> None:
-        """Coalesce rapid updates into a single Qt event-loop tick."""
-        if self.update_pending:
-            if midi is not None:
-                self.pending_midi = midi
-            if cents is not None:
-                self.pending_cents = cents
-            if rms is not None:
-                self.pending_rms = rms
-            return
-        self.pending_midi = midi
-        self.pending_cents = cents
-        self.pending_rms = rms
-        self.update_pending = True
+        """Coalesce rapid updates into a single Qt event-loop tick.
+
+        The coalescing block is guarded by a threading.Lock so that the
+        check-and-set of update_pending + pending_* values is atomic
+        across the audio and main threads.
+        """
+        with self._coalesce_lock:
+            if self.update_pending:
+                if midi is not None:
+                    self.pending_midi = midi
+                if cents is not None:
+                    self.pending_cents = cents
+                if rms is not None:
+                    self.pending_rms = rms
+                return
+            self.pending_midi = midi
+            self.pending_cents = cents
+            self.pending_rms = rms
+            self.update_pending = True
         self._update_ready.emit()  # cross-thread: queues on main event loop
 
     def _perform_gui_update(self) -> None:
         """Deliver coalesced data to the controller via callbacks."""
-        self.update_pending = False
-        midi = self.pending_midi
-        cents = self.pending_cents
-        rms = self.pending_rms
-        self.pending_midi = None
-        self.pending_cents = None
-        self.pending_rms = None
+        with self._coalesce_lock:
+            self.update_pending = False
+            midi = self.pending_midi
+            cents = self.pending_cents
+            rms = self.pending_rms
+            self.pending_midi = None
+            self.pending_cents = None
+            self.pending_rms = None
 
         # RMS callback
         if rms is not None and self.on_rms:

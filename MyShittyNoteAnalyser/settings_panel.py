@@ -269,6 +269,12 @@ class SettingsPanel(QGroupBox):
     def set_device_text(self, text: str) -> None:
         self._audio.set_device_text(text)
 
+    def set_instrument_text(self, text: str) -> None:
+        """Sync instrument combo from an external change (e.g. game settings)."""
+        self._instr_cb.blockSignals(True)
+        self._instr_cb.setCurrentText(text)
+        self._instr_cb.blockSignals(False)
+
     def set_threshold_value(self, value: float) -> None:
         self._audio.set_threshold_value(value)
 

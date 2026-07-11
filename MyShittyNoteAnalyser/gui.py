@@ -1,8 +1,3 @@
-"""Main application window — thin orchestrator composing panels and managers.
-
-Refactored in Phase 3: audio logic → AudioStreamManager,
-settings propagation → PanelCoordinator, game → GameCoordinator.
-"""
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                                 QStackedWidget, QPushButton)
 from PyQt6.QtCore import QTimer
@@ -183,7 +178,11 @@ class NoteAnalyzerApp(QMainWindow):
         gsp.game_length_changed.connect(self.game_panel.set_game_length)
         gsp.hold_duration_changed.connect(self.game_panel.set_hold_duration)
         gsp.instrument_changed.connect(self.game_panel.set_instrument)
+        gsp.instrument_changed.connect(self._on_game_instrument_changed)
         gsp.notation_changed.connect(self.game_panel.set_notation)
+        gsp.pitch_hint_changed.connect(self.game_panel.set_show_pitch_hint)
+        gsp.range_categories_changed.connect(
+            self.game_panel.set_enabled_range_categories)
 
         # ── Game audio widget → sync to main settings ────────────
         gsp.audio.device_changed.connect(self._on_game_device_changed)
@@ -250,6 +249,12 @@ class NoteAnalyzerApp(QMainWindow):
         self.audio.instrument_name = self.settings_panel.get_instrument()
         self.audio.use_aubio = self.settings_panel.get_use_aubio()
         self.audio.continue_on_silence = self.settings_panel.get_continue()
+
+    def _on_game_instrument_changed(self, instrument_name: str) -> None:
+        """Sync instrument change from game settings → audio manager
+        (keeps transposition correct) and back to the tuner settings panel."""
+        self.audio.instrument_name = instrument_name
+        self.settings_panel.set_instrument_text(instrument_name)
 
     # ── device management ────────────────────────────────────────
 
