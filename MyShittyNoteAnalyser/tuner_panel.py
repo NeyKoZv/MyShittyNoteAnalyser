@@ -1,74 +1,90 @@
-import tkinter as tk
+from PyQt6.QtWidgets import QWidget
+from PyQt6.QtGui import QPainter, QColor, QPen, QFont
+from PyQt6.QtCore import Qt
+
 from constants import (MIN_MIDI, MAX_MIDI, NOTE_SHARP_LETTER,
                        COLOR_BG_DARKER, COLOR_TUNER_TICK, COLOR_TUNER_LABEL,
                        COLOR_ACCENT_PERFECT,
                        TUNER_WIDTH, TUNER_HEIGHT, TUNER_MARGIN, TUNER_DOT_RADIUS)
 
 
-class TunerPanel(tk.Frame):
-    """Vertical slider showing the current note position against the selectable MIDI range."""
+class TunerPanel(QWidget):
+    """Vertical slider showing the current note position against the MIDI range."""
 
-    def __init__(self, parent, **kwargs):
-        super().__init__(parent, bg=COLOR_BG_DARKER, relief='sunken', bd=2, **kwargs)
-        self.canvas = tk.Canvas(self, width=TUNER_WIDTH, height=TUNER_HEIGHT,
-                                bg=COLOR_BG_DARKER, highlightthickness=0)
-        self.canvas.pack(fill='both', expand=True)
-        self.min_midi = MIN_MIDI
-        self.max_midi = MAX_MIDI
-        self.draw_scale()
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAutoFillBackground(True)
+        p = self.palette()
+        p.setColor(self.backgroundRole(), QColor(COLOR_BG_DARKER))
+        self.setPalette(p)
+        self.setFixedWidth(TUNER_WIDTH)
+        self.setMinimumHeight(TUNER_HEIGHT)
+
+        self.min_midi: int = MIN_MIDI
+        self.max_midi: int = MAX_MIDI
+        self._midi_float: float | None = None
+
+        # computed in paintEvent
+        self._plot_bottom: float = 0.0
+        self._plot_height: float = 0.0
 
     def set_range(self, min_midi: int, max_midi: int) -> None:
-        """Update the visible MIDI range and redraw the scale."""
         self.min_midi = min_midi
         self.max_midi = max_midi
-        self.draw_scale()
+        self.update()
 
-    def draw_scale(self):
-        self.canvas.delete("all")
-        w = self.canvas.winfo_width()
-        h = self.canvas.winfo_height()
-        if w < 10:
-            w = TUNER_WIDTH
-        if h < 10:
-            h = TUNER_HEIGHT
+    def update_tuner(self, midi_float: float | None) -> None:
+        self._midi_float = midi_float
+        self.update()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        w = self.width()
+        h = self.height()
 
         margin = TUNER_MARGIN
         plot_top = margin
         plot_bottom = h - margin
         plot_height = plot_bottom - plot_top
-
-        self.tuner_plot_bottom = plot_bottom
-        self.tuner_plot_height = plot_height
+        self._plot_bottom = plot_bottom
+        self._plot_height = plot_height
 
         if self.max_midi <= self.min_midi:
+            p.end()
             return
 
+        # scale ticks + labels (every 3 semitones)
+        tick_pen = QPen(QColor(COLOR_TUNER_TICK), 1)
+        label_font = QFont("Helvetica", 7)
         for midi in range(self.min_midi, self.max_midi + 1, 3):
             frac = (midi - self.min_midi) / (self.max_midi - self.min_midi)
-            y = plot_bottom - frac * plot_height
-            self.canvas.create_line(w-10, y, w, y, fill=COLOR_TUNER_TICK)
+            y = int(plot_bottom - frac * plot_height)
+
+            p.setPen(tick_pen)
+            p.drawLine(w - 10, y, w, y)
+
             note_idx = midi % 12
             letter = NOTE_SHARP_LETTER[note_idx]
             octave = (midi // 12) - 1
-            self.canvas.create_text(w-12, y, text=f"{letter}{octave}", fill=COLOR_TUNER_LABEL,
-                                    font=("Helvetica", 7), anchor='e')
+            p.setPen(QColor(COLOR_TUNER_LABEL))
+            p.setFont(label_font)
+            p.drawText(0, y - 7, w - 14, 14,
+                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                       f"{letter}{octave}")
 
-        self.tuner_dot = self.canvas.create_oval(0, 0, 0, 0,
-                                                  fill=COLOR_ACCENT_PERFECT, outline='')
+        # indicator dot
+        if self._midi_float is not None:
+            clamped = max(self.min_midi, min(self.max_midi, self._midi_float))
+            frac = (clamped - self.min_midi) / (self.max_midi - self.min_midi)
+            dy = plot_bottom - frac * plot_height
+            r = TUNER_DOT_RADIUS
 
-    def update_tuner(self, midi_float):
-        if midi_float is None:
-            self.canvas.coords(self.tuner_dot, -10, -10, -10, -10)
-            return
-        w = self.canvas.winfo_width()
-        if w < 10:
-            w = 80
-        midi_clamped = max(self.min_midi, min(self.max_midi, midi_float))
-        frac = (midi_clamped - self.min_midi) / (self.max_midi - self.min_midi)
-        y = self.tuner_plot_bottom - frac * self.tuner_plot_height
-        r = TUNER_DOT_RADIUS
-        self.canvas.coords(self.tuner_dot, w/2 - r, y - r, w/2 + r, y + r)
-        self.canvas.tag_raise(self.tuner_dot)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(COLOR_ACCENT_PERFECT))
+            p.drawEllipse(int(w / 2 - r), int(dy - r), 2 * r, 2 * r)
 
-    def on_resize(self, event):
-        self.draw_scale()
+        p.end()

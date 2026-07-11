@@ -1,146 +1,249 @@
-import tkinter as tk
-from tkinter import ttk
+from PyQt6.QtWidgets import (QWidget, QGroupBox, QPushButton, QScrollBar,
+                                QVBoxLayout, QHBoxLayout)
+from PyQt6.QtGui import QPainter, QColor, QPen, QFont
+from PyQt6.QtCore import Qt
+
 from constants import (MIN_MIDI, MAX_MIDI, NOTE_SHARP_LETTER, NOTE_SHARP_SOLFEGE,
                        NOTE_FLAT_LETTER, NOTE_FLAT_SOLFEGE,
                        COLOR_BG_DARK, COLOR_BG_DARKER, COLOR_BG_CANVAS,
-                       COLOR_BG_INPUT, COLOR_FG_PRIMARY, COLOR_BUTTON_ACTIVE,
+                       COLOR_BG_INPUT, COLOR_FG_PRIMARY,
                        COLOR_GRID_LINE, COLOR_GRID_LABEL,
                        COLOR_ACCENT_PERFECT, COLOR_ACCENT_NICE,
                        COLOR_ACCENT_GOOD, COLOR_ACCENT_BAD,
                        HISTORY_NOTE_GAP, HISTORY_SCALE_WIDTH,
                        DEFAULT_NOTATION)
 
-# ── helpers ────────────────────────────────────────────────────────────────
-
 _NOTE_GAP = HISTORY_NOTE_GAP
 _SCALE_W = HISTORY_SCALE_WIDTH
 
 
-class HistoryPanel(ttk.LabelFrame):
+class _HistoryCanvas(QWidget):
+    """Single paint widget: scale labels on the left, scrolling notes on the right."""
+
+    def __init__(self, panel: 'HistoryPanel', parent=None):
+        super().__init__(parent)
+        self.panel = panel
+        self.setAutoFillBackground(True)
+        p = self.palette()
+        p.setColor(self.backgroundRole(), QColor(COLOR_BG_CANVAS))
+        self.setPalette(p)
+        self.setMinimumHeight(200)
+
+    # ── helpers ──────────────────────────────────────────────────────
+
+    def _recalc_midi_positions(self) -> None:
+        h = self.height()
+        if h < 10:
+            h = 400
+        top, bottom = 10, h - 10
+        height = bottom - top
+        pn = self.panel
+        pn._midi_to_y = {}
+        pn._plot_top = top
+        pn._plot_bottom = bottom
+        pn._plot_height = height
+        for midi in range(pn.min_midi, pn.max_midi + 1):
+            frac = (midi - pn.min_midi) / (pn.max_midi - pn.min_midi)
+            pn._midi_to_y[midi] = bottom - frac * height
+
+    def _get_y(self, midi_float: float) -> float:
+        pn = self.panel
+        if pn.quantize:
+            return pn._midi_to_y.get(round(midi_float), pn._plot_bottom)
+        clamped = max(pn.min_midi, min(pn.max_midi, midi_float))
+        frac = (clamped - pn.min_midi) / (pn.max_midi - pn.min_midi)
+        return pn._plot_bottom - frac * pn._plot_height
+
+    @staticmethod
+    def _color_for_cents(cents: float) -> str:
+        a = abs(cents)
+        if a < 5:
+            return COLOR_ACCENT_PERFECT
+        if a < 20:
+            return COLOR_ACCENT_NICE
+        if a < 50:
+            return COLOR_ACCENT_GOOD
+        return COLOR_ACCENT_BAD
+
+    # ── paint ────────────────────────────────────────────────────────
+
+    def paintEvent(self, event):
+        self._recalc_midi_positions()
+        p = QPainter(self)
+        pn = self.panel
+
+        w, h = self.width(), self.height()
+        history = pn.note_history
+        total = len(history)
+
+        # ── viewport clipping (notes area only, right of scale) ──────
+        visible_w = max(w - _SCALE_W, 100)
+        scroll_x = pn._scroll_value
+
+        # world-space range of notes we need to draw
+        world_start = max(0, scroll_x - visible_w)      # one screen before
+        world_end = scroll_x + 2 * visible_w             # one screen after
+
+        start_idx = int(world_start / _NOTE_GAP)
+        end_idx = int(world_end / _NOTE_GAP) + 1
+        start_idx = max(0, start_idx)
+        end_idx = min(total, end_idx)
+
+        # Helper: convert note index → canvas x (right of scale column)
+        def note_x(idx: int) -> int:
+            return _SCALE_W + (idx * _NOTE_GAP - scroll_x)
+
+        # ── scale labels (left column, never scrolls) ────────────────
+        use_sharps = pn.notation == "Sharps"
+        letter_list = NOTE_SHARP_LETTER if use_sharps else NOTE_FLAT_LETTER
+        solfege_list = NOTE_SHARP_SOLFEGE if use_sharps else NOTE_FLAT_SOLFEGE
+
+        scale_pen = QPen(QColor(COLOR_GRID_LINE), 1)
+        scale_font = QFont("Helvetica", 9)
+        p.setFont(scale_font)
+
+        for midi in range(pn.min_midi, pn.max_midi + 1):
+            y = pn._midi_to_y.get(midi)
+            if y is None:
+                continue
+            y = int(y)
+            note_idx = midi % 12
+            label = f"{solfege_list[note_idx]} ({letter_list[note_idx]}{(midi // 12) - 1})"
+            # Label only — no horizontal line through the text
+            p.setPen(QColor(COLOR_GRID_LABEL))
+            p.drawText(0, y - 9, _SCALE_W - 10, 18,
+                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, label)
+
+        # ── note grid lines (always at least across visible width) ──
+        thin_pen = QPen(QColor(COLOR_GRID_LINE), 1)
+        # Rightmost x to draw grid lines to
+        if start_idx < end_idx:
+            gx_to = note_x(end_idx)
+        else:
+            gx_to = _SCALE_W + visible_w  # one screen of empty grid
+        gx_from = max(_SCALE_W, note_x(start_idx))
+
+        for midi in range(pn.min_midi, pn.max_midi + 1):
+            y = pn._midi_to_y.get(midi)
+            if y is None:
+                continue
+            y = int(y)
+            p.setPen(thin_pen)
+            p.drawLine(gx_from, y, gx_to, y)
+
+        p.setPen(Qt.PenStyle.NoPen)
+
+        # ── note blocks (visible range only) ─────────────────────
+        for i in range(start_idx, end_idx):
+                entry = history[i]
+                if entry is None:
+                    continue
+                midi_f, cents = entry
+                y = int(self._get_y(midi_f))
+                cx = max(_SCALE_W, note_x(i))  # clip to scale edge
+                color = self._color_for_cents(cents)
+
+                p.setBrush(QColor(color))
+                p.drawRect(cx, y - 4, _NOTE_GAP - 1, 8)
+
+        p.end()
+
+
+class HistoryPanel(QGroupBox):
     """Scrollable pitch-history view with a toolbar (Clear, Live)."""
 
-    def __init__(self, parent, **kwargs):
-        super().__init__(parent, text="Pitch History", style='Custom.TLabelframe', **kwargs)
+    def __init__(self, parent=None):
+        super().__init__("Pitch History", parent)
+        self.setObjectName("HistoryPanel")
+
+        # ── state ────────────────────────────────────────────────────
         self.note_history: list = []
-        self.quantize: bool = True
+        self.quantize: bool = False
         self.notation: str = DEFAULT_NOTATION
         self.min_midi: int = MIN_MIDI
         self.max_midi: int = MAX_MIDI
         self.auto_scroll: bool = True
         self._clear_callback = None
+        self._scroll_value: int = 0
+        self._midi_to_y: dict = {}
+        self._plot_top: float = 10
+        self._plot_bottom: float = 110
+        self._plot_height: float = 100
 
-        # ── two canvases side-by-side ──
-        canvas_row = tk.Frame(self, bg=COLOR_BG_DARK)
-        canvas_row.pack(fill='both', expand=True, padx=5, pady=(5, 0))
+        # ── layout ───────────────────────────────────────────────────
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(5, 8, 5, 5)
 
-        self.scale_canvas = tk.Canvas(canvas_row, width=_SCALE_W,
-                                      bg=COLOR_BG_CANVAS, highlightthickness=0)
-        self.scale_canvas.pack(side='left', fill='y')
+        # canvas
+        self._notes_canvas = _HistoryCanvas(self, self)
+        main_layout.addWidget(self._notes_canvas, stretch=1)
 
-        self.canvas = tk.Canvas(canvas_row, bg=COLOR_BG_CANVAS, highlightthickness=0)
-        self.canvas.pack(side='left', fill='both', expand=True)
+        # scrollbar
+        self._scrollbar = QScrollBar(Qt.Orientation.Horizontal, self)
+        self._scrollbar.valueChanged.connect(self._on_scroll)
+        main_layout.addWidget(self._scrollbar)
 
-        # ── scrollbar ──
-        scroll_frame = tk.Frame(self, bg=COLOR_BG_DARK)
-        scroll_frame.pack(fill='x', padx=5, pady=(0, 0))
-        self.scrollbar = ttk.Scrollbar(scroll_frame, orient='horizontal',
-                                       command=self._on_scrollbar)
-        self.scrollbar.pack(fill='x', expand=True)
+        # toolbar
+        toolbar = QWidget(self)
+        tl = QHBoxLayout(toolbar)
+        tl.setContentsMargins(0, 3, 0, 0)
 
-        self.canvas.configure(xscrollcommand=self._sync_scrollbar)
-        self.canvas.bind('<Configure>', self._on_canvas_resize)
-        self.scale_canvas.bind('<Configure>', self._on_scale_resize)
+        self._clear_btn = QPushButton("Clear")
+        self._clear_btn.clicked.connect(self._on_clear)
+        tl.addWidget(self._clear_btn)
 
-        # ── toolbar ──
-        toolbar = tk.Frame(self, bg=COLOR_BG_DARK)
-        toolbar.pack(fill='x', padx=5, pady=(3, 5))
+        self._live_btn = QPushButton("◉ Live")
+        self._live_btn.clicked.connect(self._on_live)
+        tl.addWidget(self._live_btn)
 
-        self.clear_btn = ttk.Button(toolbar, text="Clear", command=self._on_clear)
-        self.clear_btn.pack(side='left', padx=(0, 6))
+        tl.addStretch()
+        main_layout.addWidget(toolbar)
 
-        self.live_btn = ttk.Button(toolbar, text="◉ Live", command=self._on_live)
-        self.live_btn.pack(side='left')
+        self._update_scrollbar_range()
 
-        # Detect manual scroll to disable auto-scroll
-        self.canvas.bind('<ButtonPress-1>', self._on_canvas_click, add='+')
-        self.canvas.bind('<MouseWheel>', self._on_mousewheel, add='+')
+    # ── internal ─────────────────────────────────────────────────────
 
-        # Internal
-        self.block_ids: list[int] = []
-        self._plot_top: int = 10
-        self._plot_height: int = 100
-        self._plot_bottom: int = 110
-        self._scale_needs_redraw = True
-
-        self._draw_scale()
-        self.update_display()
-
-    # ── viewport helpers ─────────────────────────────────────────────────
-
-    def _get_visible_range(self):
-        """Return (start_idx, end_idx) for visible range + one screen preload."""
-        c = self.canvas
-        visible_w = max(c.winfo_width(), 100)
-        scroll_x = c.canvasx(0)
-
-        draw_start = max(0, scroll_x - visible_w)           # one screen before
-        draw_end = scroll_x + 2 * visible_w                  # one screen after
-
-        start_idx = int(draw_start / _NOTE_GAP)
-        end_idx = int(draw_end / _NOTE_GAP) + 1
-
+    def _update_scrollbar_range(self) -> None:
         total = len(self.note_history)
-        start_idx = max(0, start_idx)
-        end_idx = min(total, end_idx)
-        return start_idx, end_idx
+        visible_w = max(self._notes_canvas.width() - _SCALE_W, 100)
+        content_w = max(total * _NOTE_GAP + 20, visible_w)
+        max_val = max(0, content_w - visible_w)
+        self._scrollbar.setRange(0, max_val)
+        self._scrollbar.setPageStep(visible_w)
+        self._scrollbar.setSingleStep(_NOTE_GAP * 2)
+        if max_val > 0 and self.auto_scroll:
+            self._scrollbar.setValue(max_val)
 
-    def _redraw_visible(self) -> None:
-        """Redraw only the visible portion of the canvas + one screen preload."""
-        c = self.canvas
-        c.delete("block")
-        self.block_ids.clear()
+    def _on_scroll(self, value: int) -> None:
+        self._scroll_value = value
+        max_val = self._scrollbar.maximum()
+        self.auto_scroll = (max_val == 0) or (value >= max_val)
+        self._live_btn.setText("◉ Live" if self.auto_scroll else "○ Live")
+        self._notes_canvas.update()
 
-        history = self.note_history
-        total = len(history)
-        if total == 0:
-            return
+    def _on_clear(self) -> None:
+        if self._clear_callback:
+            self._clear_callback()
 
-        h = c.winfo_height()
-        if h < 10:
-            h = 400
+    def _on_live(self) -> None:
+        self.auto_scroll = True
+        max_val = self._scrollbar.maximum()
+        self._scrollbar.setValue(max_val)
+        self._live_btn.setText("◉ Live")
 
-        start_idx, end_idx = self._get_visible_range()
-        if start_idx >= end_idx:
-            return
+    def wheelEvent(self, event):
+        delta = event.angleDelta().y()
+        self._scrollbar.setValue(self._scrollbar.value() - delta)
+        event.accept()
 
-        # Draw grid lines only for the visible x-range
-        draw_start_x = start_idx * _NOTE_GAP
-        draw_end_x = end_idx * _NOTE_GAP
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_scrollbar_range()
+        self._notes_canvas.update()
 
-        for midi in range(self.min_midi, self.max_midi + 1):
-            y = self._midi_to_y.get(midi)
-            if y is None:
-                continue
-            c.create_line(draw_start_x, y, draw_end_x, y,
-                          fill=COLOR_GRID_LINE, width=1, tags="block")
-
-        # Draw note blocks only in the visible range
-        for i in range(start_idx, end_idx):
-            entry = history[i]
-            if entry is None:
-                continue
-            midi_float, cents = entry
-            y = self._get_y(midi_float)
-            x = i * _NOTE_GAP
-            color = self._get_color(cents)
-            item = c.create_rectangle(x, y - 4, x + _NOTE_GAP - 1, y + 4,
-                                      fill=color, outline='', tags="block")
-            self.block_ids.append(item)
-
-    # ── public API ────────────────────────────────────────────────────────
+    # ── public API ───────────────────────────────────────────────────
 
     def set_clear_callback(self, callback) -> None:
-        """Register a callable that will clear history on the controller side."""
         self._clear_callback = callback
 
     def set_history(self, history: list) -> None:
@@ -149,140 +252,17 @@ class HistoryPanel(ttk.LabelFrame):
 
     def set_notation(self, notation: str) -> None:
         self.notation = notation
-        self._scale_needs_redraw = True
-        self._draw_scale()
-        self.update_display()
+        self._notes_canvas.update()
 
     def set_quantize(self, quantize: bool) -> None:
         self.quantize = quantize
-        self.update_display()
+        self._notes_canvas.update()
 
     def set_range(self, min_midi: int, max_midi: int) -> None:
         self.min_midi = min_midi
         self.max_midi = max_midi
-        self._scale_needs_redraw = True
-        self._draw_scale()
-        self.update_display()
-
-    # ── scale (fixed left column) ────────────────────────────────────────
-
-    def _draw_scale(self) -> None:
-        c = self.scale_canvas
-        c.delete("all")
-        h = c.winfo_height()
-        if h < 10:
-            h = 400
-        top, bottom = 10, h - 10
-        height = bottom - top
-
-        self._plot_top = top
-        self._plot_bottom = bottom
-        self._plot_height = height
-
-        self._midi_to_y = {}
-        for midi in range(self.min_midi, self.max_midi + 1):
-            frac = (midi - self.min_midi) / (self.max_midi - self.min_midi)
-            self._midi_to_y[midi] = bottom - frac * height
-
-        use_sharps = self.notation == "Sharps"
-        letter_list = NOTE_SHARP_LETTER if use_sharps else NOTE_FLAT_LETTER
-        solfege_list = NOTE_SHARP_SOLFEGE if use_sharps else NOTE_FLAT_SOLFEGE
-
-        for midi in range(self.min_midi, self.max_midi + 1):
-            y = self._midi_to_y[midi]
-            c.create_line(0, y, _SCALE_W, y, fill=COLOR_GRID_LINE, width=1)
-            note_idx = midi % 12
-            label = f"{solfege_list[note_idx]} ({letter_list[note_idx]}{(midi // 12) - 1})"
-            c.create_text(_SCALE_W - 4, y, text=label, fill=COLOR_GRID_LABEL,
-                          font=("Helvetica", 9), anchor='e')
-
-    def _on_scale_resize(self, event=None):
-        if self._scale_needs_redraw or True:
-            self._draw_scale()
-            self._scale_needs_redraw = False
-
-    # ── scrolling ─────────────────────────────────────────────────────────
-
-    def _sync_scrollbar(self, first, last) -> None:
-        self.scrollbar.set(first, last)
-        # Update Live button state
-        if hasattr(self, 'live_btn'):
-            is_at_end = float(last) >= 0.999
-            self.auto_scroll = is_at_end
-            self.live_btn.configure(text="◉ Live" if is_at_end else "○ Live")
-
-    def _on_scrollbar(self, *args) -> None:
-        self.canvas.xview(*args)
-        self.auto_scroll = False
-        self._redraw_visible()
-
-    def _on_canvas_click(self, event) -> None:
-        self.auto_scroll = False
-
-    def _on_mousewheel(self, event) -> None:
-        # Windows: event.delta is multiple of 120
-        self.canvas.xview_scroll(-int(event.delta / 30), 'units')
-        self.auto_scroll = False
-        self._redraw_visible()
-
-    def _on_live(self) -> None:
-        self.auto_scroll = True
-        self.canvas.xview_moveto(1.0)
-        self.live_btn.configure(text="◉ Live")
-
-    # ── drawing ───────────────────────────────────────────────────────────
-
-    def _on_canvas_resize(self, event=None):
-        self.update_display()
+        self._notes_canvas.update()
 
     def update_display(self) -> None:
-        if not hasattr(self, '_midi_to_y'):
-            return
-
-        c = self.canvas
-        history = self.note_history
-        total = len(history)
-
-        if total == 0:
-            c.delete("block")
-            self.block_ids.clear()
-            c.configure(scrollregion=(0, 0, 1, 1))
-            return
-
-        # Update scroll region (extra margin so last note isn't cut off)
-        h = c.winfo_height()
-        if h < 10:
-            h = 400
-        content_w = max(total * _NOTE_GAP + 20, c.winfo_width())
-        c.configure(scrollregion=(0, 0, content_w, h))
-
-        # Auto-scroll to end *before* drawing so we draw the right slice
-        if self.auto_scroll:
-            self.canvas.xview_moveto(1.0)
-
-        # Only draw what's visible + one screen preload
-        self._redraw_visible()
-
-    # ── helpers ───────────────────────────────────────────────────────────
-
-    def _get_y(self, midi_float: float) -> float:
-        if self.quantize:
-            return self._midi_to_y.get(round(midi_float), self._plot_bottom)
-        midi_clamped = max(self.min_midi, min(self.max_midi, midi_float))
-        frac = (midi_clamped - self.min_midi) / (self.max_midi - self.min_midi)
-        return self._plot_bottom - frac * self._plot_height
-
-    @staticmethod
-    def _get_color(cents: float) -> str:
-        a = abs(cents)
-        if a < 5:
-            return COLOR_ACCENT_PERFECT
-        elif a < 20:
-            return COLOR_ACCENT_NICE
-        elif a < 50:
-            return COLOR_ACCENT_GOOD
-        return COLOR_ACCENT_BAD
-
-    def _on_clear(self) -> None:
-        if self._clear_callback:
-            self._clear_callback()
+        self._update_scrollbar_range()
+        self._notes_canvas.update()

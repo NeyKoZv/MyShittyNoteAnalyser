@@ -1,57 +1,110 @@
-import tkinter as tk
-from tkinter import ttk
-from constants import (COLOR_BG_DARKER, COLOR_BG_CANVAS,
+from PyQt6.QtWidgets import QWidget, QLabel, QHBoxLayout
+from PyQt6.QtGui import QPainter, QColor, QPen, QFont
+from PyQt6.QtCore import Qt
+
+from constants import (COLOR_BG_DARKER,
                        COLOR_BG_METER, COLOR_FG_PRIMARY,
                        COLOR_FG_SECONDARY, COLOR_METER_TICK,
                        COLOR_METER_CENTER,
                        METER_WIDTH, METER_HEIGHT)
 
-class InfoPanel(tk.Frame):
-    """Bottom bar showing the detected note name, accuracy, and a cents deviation meter."""
 
-    def __init__(self, parent, **kwargs):
-        super().__init__(parent, bg=COLOR_BG_DARKER, **kwargs)
-        self._build_widgets()
+class CentsMeter(QWidget):
+    """Custom paint widget for the -50..+50 cents deviation meter."""
 
-    def _build_widgets(self):
-        # Note & accuracy label (large text, color changes with accuracy)
-        self.acc_label = tk.Label(self, text="", font=("Helvetica", 18),
-                                  bg=COLOR_BG_DARKER, fg=COLOR_FG_PRIMARY)
-        self.acc_label.pack(side='left', padx=10)
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(METER_WIDTH, METER_HEIGHT)
+        self._indicator_x: float = 75.0
+        self._indicator_color = COLOR_FG_PRIMARY
 
-        # Deviation detail
-        self.detail_label = tk.Label(self, text="", font=("Helvetica", 12),
-                                     bg=COLOR_BG_DARKER, fg=COLOR_FG_SECONDARY)
-        self.detail_label.pack(side='left', padx=10)
+    def set_value(self, cents: float, color_hex: str) -> None:
+        x = 75 + (cents / 50.0) * 75
+        self._indicator_x = max(0.0, min(150.0, x))
+        self._indicator_color = color_hex
+        self.update()
 
-        # Cents deviation meter (range: -50 to +50 cents)
-        meter_frame = tk.Frame(self, bg=COLOR_BG_DARKER)
-        meter_frame.pack(side='left', padx=20)
-        self.cents_canvas = tk.Canvas(meter_frame, width=METER_WIDTH, height=METER_HEIGHT,
-                                      bg=COLOR_BG_METER, highlightthickness=1,
-                                      highlightcolor=COLOR_FG_PRIMARY)
-        self.cents_canvas.pack()
-        # Tick marks at -50, -25, 0, +25, +50 cents
-        for x in (0, 37, 75, 112, 150):
-            self.cents_canvas.create_line(x, 0, x, 4, fill=COLOR_METER_TICK)
-        self.cents_canvas.create_line(75, 0, 75, 15, fill=COLOR_METER_CENTER, width=2)
-        self.indicator = self.cents_canvas.create_rectangle(70, 2, 80, 13, fill='green')
+    def paintEvent(self, event):
+        p = QPainter(self)
 
-        # Memory usage indicator (bottom-right)
-        self.memory_label = tk.Label(self, text="", font=("Helvetica", 9),
-                                     bg=COLOR_BG_DARKER, fg=COLOR_FG_SECONDARY)
-        self.memory_label.pack(side='right', padx=10)
+        # background
+        p.fillRect(self.rect(), QColor(COLOR_BG_METER))
+
+        # tick marks at -50, -25, 0, +25, +50
+        tpen = QPen(QColor(COLOR_METER_TICK), 1)
+        p.setPen(tpen)
+        for tx in (0, 37, 75, 112, 150):
+            p.drawLine(tx, 0, tx, 4)
+
+        # center line (0 cents)
+        cpen = QPen(QColor(COLOR_METER_CENTER), 2)
+        p.setPen(cpen)
+        p.drawLine(75, 0, 75, 15)
+
+        # indicator rectangle
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(self._indicator_color))
+        ix = int(self._indicator_x)
+        p.drawRect(ix - 5, 2, 10, 11)
+
+        p.end()
+
+
+class InfoPanel(QWidget):
+    """Bottom bar showing note name, accuracy, cents meter, and memory usage."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._setup_ui()
+
+    def _setup_ui(self) -> None:
+        self.setAutoFillBackground(True)
+        p = self.palette()
+        p.setColor(self.backgroundRole(), QColor(COLOR_BG_DARKER))
+        self.setPalette(p)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 4, 10, 4)
+
+        # note & accuracy label (fixed width so the meter doesn't jump)
+        self.acc_label = QLabel("")
+        self.acc_label.setFont(QFont("Helvetica", 18))
+        self.acc_label.setFixedWidth(220)
+        self.acc_label.setStyleSheet(f"color: {COLOR_FG_PRIMARY};")
+        layout.addWidget(self.acc_label)
+
+        # deviation detail
+        self.detail_label = QLabel("")
+        self.detail_label.setFont(QFont("Helvetica", 12))
+        self.detail_label.setStyleSheet(f"color: {COLOR_FG_SECONDARY};")
+        layout.addWidget(self.detail_label)
+
+        # cents meter
+        self.cents_meter = CentsMeter(self)
+        layout.addWidget(self.cents_meter)
+
+        layout.addStretch()
+
+        # memory usage (right-aligned)
+        self.memory_label = QLabel("")
+        self.memory_label.setFont(QFont("Helvetica", 9))
+        self.memory_label.setStyleSheet(f"color: {COLOR_FG_SECONDARY};")
+        layout.addWidget(self.memory_label)
+
+    # ── public API (unchanged signatures) ──────────────────────────────
 
     def set_memory_usage(self, used: int, total: int) -> None:
-        """Update the memory usage indicator with used/total note count."""
         pct = (used / total) * 100 if total > 0 else 0
-        self.memory_label.config(text=f"{pct:.0f}% used ({used:,} / {total:,})")
+        self.memory_label.setText(f"{pct:.0f}% used ({used:,} / {total:,})")
 
-    def update_info(self, solfege, letter, acc_text, color, cents):
-        self.acc_label.config(text=f"{solfege} ({letter})  {acc_text}", fg=color)
-        self.detail_label.config(text=f"Deviation: {cents:+.1f} cents")
-        # Cents meter
-        x = 75 + (cents / 50) * 75
-        x = max(0, min(150, x))
-        self.cents_canvas.coords(self.indicator, x-5, 2, x+5, 13)
-        self.cents_canvas.itemconfig(self.indicator, fill=color)
+    def update_info(self, solfege: str, letter: str, acc_text: str,
+                    color: str, cents: float) -> None:
+        self.acc_label.setText(f"{solfege} ({letter})  {acc_text}")
+        self.acc_label.setStyleSheet(f"color: {color};")
+        self.detail_label.setText(f"Deviation: {cents:+.1f} cents")
+        self.cents_meter.set_value(cents, color)
+
+    def show_error(self, msg: str) -> None:
+        self.acc_label.setText(f"ERROR: {msg}")
+        self.acc_label.setStyleSheet("color: #ff5555;")
+        self.detail_label.setText("")

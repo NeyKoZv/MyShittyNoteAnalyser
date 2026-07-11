@@ -1,17 +1,17 @@
-import tkinter as tk
-from tkinter import ttk
+from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout)
+from PyQt6.QtCore import QTimer
+
 import sounddevice as sd
 import threading
 import queue
-import re
 import numpy as np
 from collections import deque
+
 from constants import (INSTRUMENTS, NOTE_SHARP_LETTER, NOTE_SHARP_SOLFEGE,
                        NOTE_FLAT_LETTER, NOTE_FLAT_SOLFEGE,
-                       COLOR_BG_DARK, COLOR_BG_INPUT, COLOR_BG_DARKER,
-                       COLOR_FG_PRIMARY, COLOR_BUTTON_ACTIVE,
+                       COLOR_BG_DARK, COLOR_BG_DARKER,
                        COLOR_ACCENT_PERFECT, COLOR_ACCENT_NICE,
-                       COLOR_ACCENT_GOOD, COLOR_ACCENT_BAD, COLOR_ERROR,
+                       COLOR_ACCENT_GOOD, COLOR_ACCENT_BAD,
                        NOTE_HISTORY_MAXLEN, DEFAULT_SAMPLE_RATE,
                        DEFAULT_BLOCK_SIZE, APP_GEOMETRY,
                        DEFAULT_NOTATION)
@@ -22,20 +22,35 @@ from history_panel import HistoryPanel
 from info_panel import InfoPanel
 
 
-class NoteAnalyzerApp:
+class NoteAnalyzerApp(QMainWindow):
     """Main application controller — wires audio capture to the UI panels."""
 
-    def __init__(self, root: tk.Tk) -> None:
-        self.root = root
-        self.root.title("Note Analyzer")
-        self.root.geometry(APP_GEOMETRY)
-        self.root.configure(bg=COLOR_BG_DARK)
+    def __init__(self):
+        super().__init__()
 
-        # Audio parameters
+        self.setWindowTitle("Note Analyzer")
+
+        # Full available screen height, respect user's width preference
+        screen = self.screen().availableGeometry()
+        try:
+            w_s, _ = APP_GEOMETRY.split("x")
+            self.resize(int(w_s), screen.height())
+        except Exception:
+            self.resize(950, screen.height())
+
+        # Dark background on the central widget
+        central = QWidget()
+        central.setObjectName("CentralWidget")
+        self.setCentralWidget(central)
+        main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(10, 5, 10, 5)
+        main_layout.setSpacing(5)
+
+        # ── audio parameters ──────────────────────────────────────────
         self.sample_rate: int = DEFAULT_SAMPLE_RATE
         self.current_block_size: int = DEFAULT_BLOCK_SIZE
 
-        # State
+        # ── state ─────────────────────────────────────────────────────
         self.is_running: bool = False
         self.audio_queue: queue.Queue = queue.Queue()
         self.stream: sd.InputStream | None = None
@@ -44,116 +59,98 @@ class NoteAnalyzerApp:
         self.note_history: deque = deque(maxlen=NOTE_HISTORY_MAXLEN)
         self._history_lock = threading.Lock()
 
-        # GUI coalescing – avoid flooding the main thread with redraws
+        # GUI coalescing
         self.update_pending: bool = False
         self.pending_midi: float | None = None
+        self.pending_cents: float | None = None
+        self.pending_rms: float | None = None
 
-        self._setup_styles()
+        # Last detected note (so notation change can refresh info bar)
+        self._last_midi: float | None = None
+        self._last_cents: float | None = None
 
-        self._create_panels()
+        # ── build UI ──────────────────────────────────────────────────
+        self._create_panels(main_layout)
         self._populate_devices()
 
-        # Wire up callbacks
+
+        # Trigger OS microphone permission dialog after the window shows
+        QTimer.singleShot(0, self._request_mic_permission)
+
+        # ── wire callbacks ────────────────────────────────────────────
         self.settings_panel.set_start_stop_callback(self.toggle_analysis)
         self.settings_panel.set_buffer_callback(self._on_buffer_changed)
         self.settings_panel.set_device_callback(self._on_device_changed)
         self.settings_panel.set_notation_callback(self._on_notation_changed)
         self.settings_panel.set_quantize_callback(self._on_quantize_changed)
         self.settings_panel.set_min_max_callback(self._on_min_max_changed)
+        self.settings_panel.set_reset_callback(self._on_reset)
 
         self.current_block_size = self.settings_panel.get_buffer_size()
 
-    # ------------------------------------------------------------------
-    # Theming
-    # ------------------------------------------------------------------
+        # Push initial settings to the history panel
+        self.history_panel.set_notation(self.settings_panel.get_notation())
+        self.history_panel.set_quantize(self.settings_panel.get_quantize())
+        self.history_panel.set_range(
+            self.settings_panel.get_min_midi(),
+            self.settings_panel.get_max_midi())
 
-    def _setup_styles(self) -> None:
-        """Configure ttk styles for the dark theme used across all panels."""
-        style = ttk.Style()
-        style.theme_use('clam')
-        style.configure('Custom.TLabelframe', background=COLOR_BG_DARK,
-                        foreground=COLOR_FG_PRIMARY, borderwidth=2)
-        style.configure('Custom.TLabelframe.Label', foreground=COLOR_FG_PRIMARY,
-                        background=COLOR_BG_DARK)
-        style.configure('TCombobox',
-                        fieldbackground=COLOR_BG_INPUT,
-                        background=COLOR_BG_DARK,
-                        foreground=COLOR_FG_PRIMARY,
-                        arrowcolor=COLOR_FG_PRIMARY)
-        style.map('TCombobox',
-                  fieldbackground=[('readonly', COLOR_BG_INPUT)],
-                  foreground=[('readonly', COLOR_FG_PRIMARY)])
-        # Register a tcl helper to style the combobox popdown listbox
-        style.tk.eval("""
-            proc ::ConfigureComboboxPopdown {cb} {
-                if {[info exists ttk::combobox::${cb}(popdown)]} {
-                    set pop $ttk::combobox::${cb}(popdown)
-                    catch {
-                        $pop.f.l configure -background #2b2b2b -foreground white \
-                                           -selectbackground #555555 -selectforeground white
-                    }
-                }
-            }
-        """)
-        style.configure('TButton', background=COLOR_BG_INPUT,
-                        foreground=COLOR_FG_PRIMARY)
-        style.map('TButton', background=[('active', COLOR_BUTTON_ACTIVE)])
-        style.configure('TCheckbutton', foreground=COLOR_FG_PRIMARY,
-                        background=COLOR_BG_DARK)
-        style.map('TCheckbutton',
-                  background=[('active', COLOR_BG_INPUT), ('selected', COLOR_BG_DARK)],
-                  foreground=[('active', COLOR_FG_PRIMARY), ('selected', COLOR_FG_PRIMARY)])
+    # ── layout ───────────────────────────────────────────────────────
 
-    def _create_panels(self) -> None:
-        """Build the three-panel layout: settings, tuner, history, and info bar."""
-        top_frame = tk.Frame(self.root, bg=COLOR_BG_DARK)
-        top_frame.pack(fill='x', padx=10, pady=5)
+    def _create_panels(self, main_layout: QVBoxLayout) -> None:
+        """Build the panel layout: settings | tuner (top), history, info bar."""
 
-        self.settings_panel = SettingsPanel(top_frame)
-        self.settings_panel.grid(row=0, column=0, sticky='nsew')
+        # top row: settings + tuner
+        top_widget = QWidget()
+        top_layout = QHBoxLayout(top_widget)
+        top_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.tuner_panel = TunerPanel(top_frame)
-        self.tuner_panel.grid(row=0, column=1, sticky='ns', padx=10, pady=5)
+        self.settings_panel = SettingsPanel()
+        top_layout.addWidget(self.settings_panel, stretch=1)
 
-        top_frame.columnconfigure(0, weight=1)
-        top_frame.columnconfigure(1, weight=0)
+        self.tuner_panel = TunerPanel()
+        top_layout.addWidget(self.tuner_panel, stretch=0)
 
-        self.history_panel = HistoryPanel(self.root)
-        self.history_panel.pack(fill='both', expand=True, padx=10, pady=5)
+        main_layout.addWidget(top_widget, stretch=0)
 
-        self.info_panel = InfoPanel(self.root)
-        self.info_panel.pack(fill='x', padx=10, pady=5)
-
-        self.tuner_panel.bind('<Configure>', lambda e: self.tuner_panel.on_resize(e))
+        # history (middle, fills remaining space)
+        self.history_panel = HistoryPanel()
         self.history_panel.set_clear_callback(self._on_clear_history)
+        main_layout.addWidget(self.history_panel, stretch=1)
+
+        # info bar (bottom)
+        self.info_panel = InfoPanel()
+        main_layout.addWidget(self.info_panel, stretch=0)
+
+    # ── device management ────────────────────────────────────────────
 
     def _populate_devices(self) -> None:
-        """Query system audio inputs and populate the microphone combobox."""
         devices = sd.query_devices()
-        input_devices = []
+        self._device_name_to_index = {}
+        clean_names = []
         for i, dev in enumerate(devices):
             if dev['max_input_channels'] > 0:
-                input_devices.append(f"{dev['name']} (index {i})")
-        self.settings_panel.populate_devices(input_devices)
+                name = dev['name']
+                self._device_name_to_index[name] = i
+                clean_names.append(name)
+        self.settings_panel.populate_devices(clean_names)
         self._on_device_changed()
 
-    def _get_device_index(self):
-        """Extract the numeric device index from the settings combobox."""
+    def _get_device_index(self) -> int:
         selected = self.settings_panel.get_device()
-        match = re.search(r'\(index (\d+)\)', selected)
-        if match:
-            return int(match.group(1))
+        idx = self._device_name_to_index.get(selected)
+        if idx is not None:
+            return idx
         device = sd.default.device
         return device[0] if isinstance(device, tuple) else device
 
-    def _on_device_changed(self):
-        """React to a microphone change — refresh sample rate & restart if active."""
+    def _on_device_changed(self) -> None:
         device_idx = self._get_device_index()
         try:
             dev_info = sd.query_devices(device_idx)
             sr = dev_info.get('default_samplerate', DEFAULT_SAMPLE_RATE)
         except Exception:
-            sr = self.sample_rate  # fallback to current value
+            sr = self.sample_rate
         self.sample_rate = int(sr)
         self.settings_panel.set_sample_rate(self.sample_rate)
         if self.is_running:
@@ -161,37 +158,61 @@ class NoteAnalyzerApp:
             self.start_analysis()
 
     def _on_buffer_changed(self, new_block_size: int) -> None:
-        """React to a buffer-size change — update & restart if active."""
         self.current_block_size = int(new_block_size)
         if self.is_running:
             self.stop_analysis()
             self.start_analysis()
 
+    def _request_mic_permission(self) -> None:
+        """Probe microphone in a background thread so the UI isn't blocked
+        if the OS shows a permission dialog."""
+        import threading
+        def _probe():
+            try:
+                idx = self._get_device_index()
+                probe = sd.InputStream(device=idx, channels=1,
+                                       samplerate=self.sample_rate, blocksize=512)
+                probe.start()
+                probe.stop()
+                probe.close()
+            except Exception:
+                pass  # permission denied or no device — user will see error later
+        threading.Thread(target=_probe, daemon=True).start()
+
+    # ── callback handlers ────────────────────────────────────────────
+
     def _on_notation_changed(self) -> None:
-        """Redraw the history and tuner scales immediately when notation changes."""
         notation = self.settings_panel.get_notation()
         self.history_panel.set_notation(notation)
+        # Refresh the info bar immediately with the new notation
+        if self._last_midi is not None and self._last_cents is not None:
+            self._update_info_from_midi(self._last_midi, self._last_cents)
 
     def _on_quantize_changed(self) -> None:
-        """Refresh the history display immediately when quantize toggles."""
         self.history_panel.set_quantize(self.settings_panel.get_quantize())
 
     def _on_min_max_changed(self) -> None:
-        """Refresh both panels when the MIDI range changes."""
         min_midi = self.settings_panel.get_min_midi()
         max_midi = self.settings_panel.get_max_midi()
         self.tuner_panel.set_range(min_midi, max_midi)
         self.history_panel.set_range(min_midi, max_midi)
 
+    def _on_reset(self) -> None:
+        """Refresh all panels after a factory reset."""
+        self._on_notation_changed()
+        self._on_quantize_changed()
+        self._on_min_max_changed()
+        self.current_block_size = self.settings_panel.get_buffer_size()
+
+    # ── analysis lifecycle ───────────────────────────────────────────
+
     def toggle_analysis(self) -> None:
-        """Start or stop the audio analysis pipeline."""
         if self.is_running:
             self.stop_analysis()
         else:
             self.start_analysis()
 
     def start_analysis(self) -> None:
-        """Open an audio input stream and launch the processing thread."""
         device_idx = self._get_device_index()
         block_size = self.current_block_size
         sr = self.sample_rate
@@ -202,18 +223,18 @@ class NoteAnalyzerApp:
                 channels=1,
                 samplerate=sr,
                 blocksize=block_size,
-                callback=self.audio_callback
+                callback=self.audio_callback,
             )
             self.stream.start()
             self.is_running = True
-            self.settings_panel.start_btn.config(text="⏹  Stop")
-            self.processing_thread = threading.Thread(target=self.process_audio, daemon=True)
+            self.settings_panel.set_button_text("⏹  Stop")
+            self.processing_thread = threading.Thread(
+                target=self.process_audio, daemon=True)
             self.processing_thread.start()
         except Exception as e:
-            self.info_panel.acc_label.config(text=f"ERROR: {e}", fg=COLOR_ERROR)
+            self.info_panel.show_error(str(e))
 
     def stop_analysis(self) -> None:
-        """Close the audio stream, stop the processing thread, and flush the queue."""
         self.is_running = False
         self.update_pending = False
         self.pending_midi = None
@@ -221,7 +242,7 @@ class NoteAnalyzerApp:
             self.stream.stop()
             self.stream.close()
             self.stream = None
-        self.settings_panel.start_btn.config(text="▶  Start")
+        self.settings_panel.set_button_text("▶  Start")
         while not self.audio_queue.empty():
             try:
                 self.audio_queue.get_nowait()
@@ -229,13 +250,13 @@ class NoteAnalyzerApp:
                 break
 
     def audio_callback(self, indata, frames, time_info, status) -> None:
-        """Called by sounddevice on a background thread for each audio block."""
         if status:
             print("Audio status:", status)
         self.audio_queue.put(indata.copy())
 
+    # ── audio processing (background thread) ─────────────────────────
+
     def process_audio(self) -> None:
-        """Worker thread loop: pull audio from the queue, detect pitch, update state."""
         while self.is_running:
             try:
                 data = self.audio_queue.get(timeout=0.1)
@@ -243,94 +264,107 @@ class NoteAnalyzerApp:
                 continue
             audio = data.flatten()
 
-            rms = np.sqrt(np.mean(audio**2))
+            rms = np.sqrt(np.mean(audio ** 2))
             threshold = self.settings_panel.get_threshold()
             if rms < threshold:
                 if self.settings_panel.get_continue():
                     with self._history_lock:
                         self.note_history.append(None)
-                    self.schedule_gui_update(midi=None)
+                    self.schedule_gui_update(midi=None, rms=rms)
+                else:
+                    self.schedule_gui_update(midi=None, rms=rms)
                 continue
 
             use_aubio = self.settings_panel.get_use_aubio()
-            freq = detect_pitch(audio, self.sample_rate, self.current_block_size, use_aubio=use_aubio)
-            if freq is not None and freq > 0:
-                midi = freq_to_midi(freq)
-                if midi is None:
-                    continue
-                instr = self.settings_panel.get_instrument()
-                offset = INSTRUMENTS.get(instr, 0)
-                midi_written = midi + offset
-                midi_rounded = round(midi_written)
-                cents = (midi_written - midi_rounded) * 100
+            freq = detect_pitch(audio, self.sample_rate, self.current_block_size,
+                                use_aubio=use_aubio)
+            if freq is None or freq <= 0:
+                continue
 
-                with self._history_lock:
-                    self.note_history.append((midi_written, cents))
+            midi = freq_to_midi(freq)
+            if midi is None:
+                continue
 
-                note_idx = midi_rounded % 12
-                notation = self.settings_panel.get_notation()
-                if notation == DEFAULT_NOTATION:
-                    letter = NOTE_SHARP_LETTER[note_idx]
-                    solfege = NOTE_SHARP_SOLFEGE[note_idx]
-                else:
-                    letter = NOTE_FLAT_LETTER[note_idx]
-                    solfege = NOTE_FLAT_SOLFEGE[note_idx]
+            instr = self.settings_panel.get_instrument()
+            offset = INSTRUMENTS.get(instr, 0)
+            midi_written = midi + offset
+            midi_rounded = round(midi_written)
+            cents = (midi_written - midi_rounded) * 100
 
-                self.root.after(0, self._update_info, solfege, letter, cents)
-                self.schedule_gui_update(midi=midi_written)
+            with self._history_lock:
+                self.note_history.append((midi_written, cents))
 
-    def schedule_gui_update(self, midi: float | None = None) -> None:
-        """Coalesce tuner + history redraws so the main thread isn't flooded."""
+            self.schedule_gui_update(midi=midi_written, cents=cents, rms=rms)
+
+    # ── GUI coalescing ───────────────────────────────────────────────
+
+    def schedule_gui_update(self, midi: float | None = None,
+                             cents: float | None = None,
+                             rms: float | None = None) -> None:
         if self.update_pending:
             if midi is not None:
                 self.pending_midi = midi
+            if cents is not None:
+                self.pending_cents = cents
+            if rms is not None:
+                self.pending_rms = rms
             return
         self.pending_midi = midi
+        self.pending_cents = cents
+        self.pending_rms = rms
         self.update_pending = True
-        self.root.after_idle(self._perform_gui_update)
+        QTimer.singleShot(0, self._perform_gui_update)
 
     def _perform_gui_update(self) -> None:
-        """Batch-redraw the tuner and history when the main thread is idle."""
         self.update_pending = False
         midi_to_use = self.pending_midi
+        cents = self.pending_cents
+        rms = self.pending_rms
         self.pending_midi = None
+        self.pending_cents = None
+        self.pending_rms = None
 
-        if midi_to_use is not None:
-            self._update_tuner(midi_to_use)
-        else:
-            self._update_tuner(None)
-
+        self._update_tuner(midi_to_use)
+        if midi_to_use is not None and cents is not None:
+            self._last_midi = midi_to_use
+            self._last_cents = cents
+            self._update_info_from_midi(midi_to_use, cents)
+        if rms is not None:
+            self.settings_panel.set_rms_level(rms)
         self._update_history()
 
-    def _update_info(self, solfege: str, letter: str, cents: float) -> None:
-        """Derive accuracy label/color from the cents deviation and push to the info panel."""
+    # ── info / tuner / history helpers ───────────────────────────────
+
+    def _update_info_from_midi(self, midi_float: float, cents: float) -> None:
+        """Derive note name + accuracy from MIDI value, push to info panel."""
         abs_cents = abs(cents)
         if abs_cents < 5:
-            acc = "Perfect"
-            color = COLOR_ACCENT_PERFECT
+            acc, color = "Perfect", COLOR_ACCENT_PERFECT
         elif abs_cents < 20:
-            acc = "Nice"
-            color = COLOR_ACCENT_NICE
+            acc, color = "Nice", COLOR_ACCENT_NICE
         elif abs_cents < 50:
-            acc = "Good"
-            color = COLOR_ACCENT_GOOD
+            acc, color = "Good", COLOR_ACCENT_GOOD
         else:
-            acc = "Bad"
-            color = COLOR_ACCENT_BAD
+            acc, color = "Bad", COLOR_ACCENT_BAD
+
+        midi_rounded = round(midi_float)
+        note_idx = midi_rounded % 12
+        notation = self.settings_panel.get_notation()
+        use_sharps = notation == "Sharps"
+        letter = (NOTE_SHARP_LETTER if use_sharps else NOTE_FLAT_LETTER)[note_idx]
+        solfege = (NOTE_SHARP_SOLFEGE if use_sharps else NOTE_FLAT_SOLFEGE)[note_idx]
+
         self.info_panel.update_info(solfege, letter, acc, color, cents)
 
     def _update_tuner(self, midi_float: float | None) -> None:
-        """Forward the current MIDI value to the tuner panel."""
         self.tuner_panel.update_tuner(midi_float)
 
     def _on_clear_history(self) -> None:
-        """Clear all note history and refresh the display."""
         with self._history_lock:
             self.note_history.clear()
         self._update_history()
 
     def _update_history(self) -> None:
-        """Copy the latest note history to the history panel."""
         with self._history_lock:
             history_copy = list(self.note_history)
             used = len(self.note_history)
@@ -338,12 +372,14 @@ class NoteAnalyzerApp:
         self.info_panel.set_memory_usage(used, NOTE_HISTORY_MAXLEN)
         quantize = self.settings_panel.get_quantize()
         notation = self.settings_panel.get_notation()
-        if not hasattr(self.history_panel, 'notation') or self.history_panel.notation != notation:
+        if (not hasattr(self.history_panel, 'notation')
+                or self.history_panel.notation != notation):
             self.history_panel.set_notation(notation)
         if self.history_panel.quantize != quantize:
             self.history_panel.set_quantize(quantize)
 
-    def on_closing(self) -> None:
-        """Clean shutdown — stop analysis and destroy the window."""
+    # ── shutdown ─────────────────────────────────────────────────────
+
+    def closeEvent(self, event):
         self.stop_analysis()
-        self.root.destroy()
+        event.accept()

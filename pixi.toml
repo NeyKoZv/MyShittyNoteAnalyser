@@ -1,0 +1,12 @@
+[workspace]
+authors = ["Nicolas <nicolas@ardisoft.com>"]
+channels = ["conda-forge"]
+name = "MyShittyNoteAnalyser"
+platforms = ["win-64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+numpy = ">=2.5.1,<3"
+pyqt6 = ">=6.11.0,<7"

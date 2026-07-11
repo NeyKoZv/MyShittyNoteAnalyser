@@ -31,3 +31,14 @@ Thumbs.db
 # Environment
 .env.local
 .env.*.local
+
+# PyInstaller
+*.manifest
+
+# Downloaded files
+*.zip
+*.exe
+
+# Pixi
+.pixi/*
+!.pixi/config.toml
