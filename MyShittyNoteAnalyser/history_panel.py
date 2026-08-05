@@ -8,12 +8,10 @@ from MyShittyNoteAnalyser.constants import (MIN_MIDI, MAX_MIDI, NOTE_SHARP_LETTE
                                             COLOR_BG_DARK, COLOR_BG_DARKER, COLOR_BG_CANVAS,
                                             COLOR_BG_INPUT, COLOR_FG_PRIMARY,
                                             COLOR_GRID_LINE, COLOR_GRID_LABEL,
+                                            COLOR_ACCENT_PERFECT,
                                             HISTORY_NOTE_GAP, HISTORY_SCALE_WIDTH,
                                             DEFAULT_NOTATION)
-from MyShittyNoteAnalyser.note_utils import cents_to_color, midi_to_y
-
-_NOTE_GAP = HISTORY_NOTE_GAP
-_SCALE_W = HISTORY_SCALE_WIDTH
+from MyShittyNoteAnalyser.note_utils import cents_to_color, midi_to_y, midi_to_note_text, cents_to_accuracy
 
 
 class _HistoryCanvas(QWidget):
@@ -64,21 +62,21 @@ class _HistoryCanvas(QWidget):
         total = len(history)
 
         # ── viewport clipping (notes area only, right of scale) ──────
-        visible_w = max(w - _SCALE_W, 100)
+        visible_w = max(w - HISTORY_SCALE_WIDTH, 100)
         scroll_x = pn._scroll_value
 
         # world-space range of notes we need to draw
         world_start = max(0, scroll_x - visible_w)      # one screen before
         world_end = scroll_x + 2 * visible_w             # one screen after
 
-        start_idx = int(world_start / _NOTE_GAP)
-        end_idx = int(world_end / _NOTE_GAP) + 1
+        start_idx = int(world_start / HISTORY_NOTE_GAP)
+        end_idx = int(world_end / HISTORY_NOTE_GAP) + 1
         start_idx = max(0, start_idx)
         end_idx = min(total, end_idx)
 
         # Helper: convert note index → canvas x (right of scale column)
         def note_x(idx: int) -> int:
-            return _SCALE_W + (idx * _NOTE_GAP - scroll_x)
+            return HISTORY_SCALE_WIDTH + (idx * HISTORY_NOTE_GAP - scroll_x)
 
         # ── scale labels (left column, never scrolls) ────────────────
         use_sharps = pn.notation == "Sharps"
@@ -98,7 +96,7 @@ class _HistoryCanvas(QWidget):
             label = f"{solfege_list[note_idx]} ({letter_list[note_idx]}{(midi // 12) - 1})"
             # Label only — no horizontal line through the text
             p.setPen(QColor(COLOR_GRID_LABEL))
-            p.drawText(0, y - 9, _SCALE_W - 10, 18,
+            p.drawText(0, y - 9, HISTORY_SCALE_WIDTH - 10, 18,
                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, label)
 
         # ── note grid lines (always at least across visible width) ──
@@ -107,8 +105,8 @@ class _HistoryCanvas(QWidget):
         if start_idx < end_idx:
             gx_to = note_x(end_idx)
         else:
-            gx_to = _SCALE_W + visible_w  # one screen of empty grid
-        gx_from = max(_SCALE_W, note_x(start_idx))
+            gx_to = HISTORY_SCALE_WIDTH + visible_w  # one screen of empty grid
+        gx_from = max(HISTORY_SCALE_WIDTH, note_x(start_idx))
 
         for midi in range(pn.min_midi, pn.max_midi + 1):
             y = pn._midi_to_y.get(midi)
@@ -129,13 +127,37 @@ class _HistoryCanvas(QWidget):
                 y = int(self._get_y(midi_f))
                 nx = note_x(i)
                 # Skip notes entirely off-screen to the left
-                if nx + _NOTE_GAP < _SCALE_W:
+                if nx + HISTORY_NOTE_GAP < HISTORY_SCALE_WIDTH:
                     continue
                 cx = int(nx)
                 color = cents_to_color(cents)
 
                 p.setBrush(QColor(color))
-                p.drawRect(cx, y - 4, _NOTE_GAP - 1, 8)
+                p.drawRect(cx, y - 4, HISTORY_NOTE_GAP - 1, 8)
+
+        # ── current-note indicator (right edge of canvas) ──────
+        if pn._current_midi is not None:
+            cur_y = int(self._get_y(pn._current_midi))
+            cur_cents = pn._current_cents or 0.0
+            cur_color = cents_to_color(cur_cents)
+
+            # Glowing dot on the right edge
+            dot_r = 8
+            dot_x = w - dot_r - 4
+            p.setBrush(QColor(cur_color))
+            p.setPen(QPen(QColor("#ffffff"), 2))
+            p.drawEllipse(dot_x - dot_r, cur_y - dot_r, dot_r * 2, dot_r * 2)
+
+            # Note label top-left
+            note_font = QFont("Helvetica", 9, QFont.Weight.Bold)
+            p.setFont(note_font)
+            p.setPen(QColor(cur_color))
+            use_sharps = pn.notation == "Sharps"
+            solfege, letter = midi_to_note_text(round(pn._current_midi), use_sharps)
+            label = f"{solfege} ({letter})"
+            p.drawText(4, cur_y - 16, HISTORY_SCALE_WIDTH - 16, 18,
+                       Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                       label)
 
         p.end()
 
@@ -163,6 +185,8 @@ class HistoryPanel(QGroupBox):
         self._plot_top: float = 10
         self._plot_bottom: float = 110
         self._plot_height: float = 100
+        self._current_midi: float | None = None
+        self._current_cents: float | None = None
 
         # ── layout ───────────────────────────────────────────────────
         main_layout = QVBoxLayout(self)
@@ -199,12 +223,12 @@ class HistoryPanel(QGroupBox):
 
     def _update_scrollbar_range(self) -> None:
         total = len(self.note_history)
-        visible_w = max(self._notes_canvas.width() - _SCALE_W, 100)
-        content_w = max(total * _NOTE_GAP + 20, visible_w)
+        visible_w = max(self._notes_canvas.width() - HISTORY_SCALE_WIDTH, 100)
+        content_w = max(total * HISTORY_NOTE_GAP + 20, visible_w)
         max_val = max(0, content_w - visible_w)
         self._scrollbar.setRange(0, max_val)
         self._scrollbar.setPageStep(visible_w)
-        self._scrollbar.setSingleStep(_NOTE_GAP * 2)
+        self._scrollbar.setSingleStep(HISTORY_NOTE_GAP * 2)
         if max_val > 0 and self.auto_scroll:
             self._scrollbar.setValue(max_val)
 
@@ -260,4 +284,11 @@ class HistoryPanel(QGroupBox):
 
     def update_display(self) -> None:
         self._update_scrollbar_range()
+        self._notes_canvas.update()
+
+    def set_current_note(self, midi_float: float | None,
+                          cents: float | None = None) -> None:
+        """Set the live current-note indicator position on the scale."""
+        self._current_midi = midi_float
+        self._current_cents = cents
         self._notes_canvas.update()

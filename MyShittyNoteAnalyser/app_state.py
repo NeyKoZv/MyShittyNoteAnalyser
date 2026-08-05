@@ -5,8 +5,6 @@ for the audio analysis pipeline.
     IDLE ──start_stream()──▶ RMS_ONLY
     RMS_ONLY ──enable_full_analysis()──▶ FULL_ANALYSIS
     FULL_ANALYSIS ──disable_full_analysis()──▶ RMS_ONLY
-    FULL_ANALYSIS ──start_game()──▶ GAME_ACTIVE
-    GAME_ACTIVE ──stop_game()──▶ FULL_ANALYSIS
     any ──stop_stream()──▶ IDLE
 """
 
@@ -18,16 +16,13 @@ class AppState(Enum):
     IDLE = "idle"
     RMS_ONLY = "rms_only"
     FULL_ANALYSIS = "full_analysis"
-    GAME_ACTIVE = "game_active"
 
 
 # Valid transitions: {from_state: {to_state, ...}}
 _VALID_TRANSITIONS: dict[AppState, set[AppState]] = {
     AppState.IDLE:           {AppState.RMS_ONLY},
     AppState.RMS_ONLY:       {AppState.FULL_ANALYSIS, AppState.IDLE},
-    AppState.FULL_ANALYSIS:  {AppState.RMS_ONLY, AppState.GAME_ACTIVE,
-                               AppState.IDLE},
-    AppState.GAME_ACTIVE:    {AppState.FULL_ANALYSIS, AppState.IDLE},
+    AppState.FULL_ANALYSIS:  {AppState.RMS_ONLY, AppState.IDLE},
 }
 
 

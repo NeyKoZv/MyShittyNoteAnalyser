@@ -1,47 +1,38 @@
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                                QStackedWidget, QPushButton)
+from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout)
 from PyQt6.QtCore import QTimer
 
-from MyShittyNoteAnalyser.constants import APP_GEOMETRY
+from MyShittyNoteAnalyser.constants import APP_GEOMETRY as _APP_GEOMETRY
 from MyShittyNoteAnalyser.settings_panel import SettingsPanel
-from MyShittyNoteAnalyser.tuner_panel import TunerPanel
 from MyShittyNoteAnalyser.history_panel import HistoryPanel
-from MyShittyNoteAnalyser.info_panel import InfoPanel
-from MyShittyNoteAnalyser.game_panel import GamePanel
-from MyShittyNoteAnalyser.game_settings_panel import GameSettingsPanel
 from MyShittyNoteAnalyser.audio_stream_manager import AudioStreamManager
 from MyShittyNoteAnalyser.panel_coordinator import PanelCoordinator
-from MyShittyNoteAnalyser.game_coordinator import GameCoordinator
 
 
 class NoteAnalyzerApp(QMainWindow):
-    """Main application — creates panels, wires managers, handles shutdown."""
+    """Main application — left column (settings), right column (history full height)."""
 
     def __init__(self):
         super().__init__()
 
         self.setWindowTitle("Note Analyzer")
 
-        # 90% of available screen height, respect user's width preference
         screen = self.screen().availableGeometry()
         try:
-            w_s, _ = APP_GEOMETRY.split("x")
-            self.resize(int(w_s), int(screen.height() * 0.9))
+            w_s, h_s = _APP_GEOMETRY.split("x")
+            self.resize(int(w_s), int(h_s))
         except Exception:
             self.resize(950, int(screen.height() * 0.9))
 
-        # Dark background on the central widget
         central = QWidget()
         central.setObjectName("CentralWidget")
         self.setCentralWidget(central)
-        main_layout = QVBoxLayout(central)
-        main_layout.setContentsMargins(10, 5, 10, 5)
-        main_layout.setSpacing(5)
+        main_layout = QHBoxLayout(central)
+        main_layout.setContentsMargins(8, 6, 8, 6)
+        main_layout.setSpacing(8)
 
         # ── managers ──────────────────────────────────────────────
         self.audio = AudioStreamManager()
         self.coordinator = None   # created after panels exist
-        self.game_coord = None    # created after panels exist
 
         # ── build UI ──────────────────────────────────────────────
         self._create_panels(main_layout)
@@ -69,77 +60,20 @@ class NoteAnalyzerApp(QMainWindow):
 
     # ── layout ───────────────────────────────────────────────────
 
-    def _create_panels(self, main_layout: QVBoxLayout) -> None:
-        """Build the panel layout with QStackedWidget for tuner↔game switching."""
+    def _create_panels(self, main_layout: QHBoxLayout) -> None:
+        """Two-column layout: left (settings), right (history)."""
 
-        # ── Page 0: Tuner / Analyzer view ────────────────────────
-        tuner_view = QWidget()
-        tuner_layout = QVBoxLayout(tuner_view)
-        tuner_layout.setContentsMargins(0, 0, 0, 0)
-        tuner_layout.setSpacing(5)
-
-        top_widget = QWidget()
-        top_layout = QHBoxLayout(top_widget)
-        top_layout.setContentsMargins(0, 0, 0, 0)
-
+        # ── Left column: Settings ───────────────────────────────
         self.settings_panel = SettingsPanel()
-        top_layout.addWidget(self.settings_panel, stretch=1)
+        main_layout.addWidget(self.settings_panel, stretch=0)
 
-        self.tuner_panel = TunerPanel()
-        top_layout.addWidget(self.tuner_panel, stretch=0)
-        tuner_layout.addWidget(top_widget, stretch=0)
-
+        # ── Right column: History (full height) ─────────────────
         self.history_panel = HistoryPanel()
-        tuner_layout.addWidget(self.history_panel, stretch=1)
+        main_layout.addWidget(self.history_panel, stretch=1)
 
-        self.info_panel = InfoPanel()
-        tuner_layout.addWidget(self.info_panel, stretch=0)
-
-        # ── Page 1: Game view ────────────────────────────────────
-        game_view = QWidget()
-        game_layout = QVBoxLayout(game_view)
-        game_layout.setContentsMargins(0, 0, 0, 0)
-        game_layout.setSpacing(8)
-
-        self.game_settings_panel = GameSettingsPanel()
-        game_layout.addWidget(self.game_settings_panel, stretch=0)
-
-        self.game_panel = GamePanel()
-        game_layout.addWidget(self.game_panel, stretch=1)
-
-        # ── Stacked widget ───────────────────────────────────────
-        self._view_stack = QStackedWidget()
-        self._view_stack.addWidget(tuner_view)   # index 0
-        self._view_stack.addWidget(game_view)     # index 1
-
-        main_layout.addWidget(self._view_stack, stretch=1)
-
-        # ── Game button bar ──────────────────────────────────────
-        btn_bar = QWidget()
-        btn_layout = QHBoxLayout(btn_bar)
-        btn_layout.setContentsMargins(0, 0, 0, 0)
-        btn_layout.addStretch()
-        self._game_btn = QPushButton("🎮  Play Game")
-        self._game_btn.setMinimumHeight(30)
-        self._game_btn.setMaximumWidth(150)
-        self._game_btn.setToolTip("Switch to Note Training Game mode")
-        self._game_btn.clicked.connect(self._on_game_button)
-        btn_layout.addWidget(self._game_btn)
-        main_layout.insertWidget(0, btn_bar)
-
-        # ── Create coordinators ──────────────────────────────────
+        # ── Create coordinator ──────────────────────────────────
         self.coordinator = PanelCoordinator(
-            self.settings_panel, self.tuner_panel,
-            self.history_panel, self.info_panel,
-            self.game_panel, self.game_settings_panel)
-        self.game_coord = GameCoordinator(
-            self.settings_panel, self.game_panel,
-            self.game_settings_panel, self._view_stack, self._game_btn)
-
-        # ── Game coordinator callbacks ───────────────────────────
-        self.game_coord.enable_full_analysis_cb = self._enable_full_analysis
-        self.game_coord.disable_full_analysis_cb = self._disable_full_analysis
-        self.game_coord.restart_stream_cb = self._restart_audio_stream
+            self.settings_panel, self.history_panel)
 
     # ── signal wiring ────────────────────────────────────────────
 
@@ -147,7 +81,6 @@ class NoteAnalyzerApp(QMainWindow):
         """Connect panel signals to coordinator / controller methods."""
         sp = self.settings_panel
 
-        # ── Settings panel signals → controller ─────────────────
         sp.set_start_stop_callback(self._toggle_analysis)
         sp.audio.buffer_changed.connect(self._on_buffer_changed)
         sp.audio.device_changed.connect(self._on_device_changed)
@@ -156,82 +89,43 @@ class NoteAnalyzerApp(QMainWindow):
         sp.range_changed.connect(self.coordinator.propagate_range)
         sp.reset_requested.connect(self.coordinator.propagate_reset)
 
-        # ── sync audio settings to audio manager in real-time ────
         sp.connect_audio_sync(self._sync_audio_settings)
 
-        # ── History panel ────────────────────────────────────────
         self.history_panel.set_clear_callback(self._on_clear_history)
-
-        # ── Game settings signals → game coordinator ─────────────
-        gsp = self.game_settings_panel
-        gsp.start_requested.connect(self.game_coord.start_game)
-        gsp.stop_requested.connect(self.game_coord.stop_game)
-        gsp.back_to_tuner.connect(self.game_coord.switch_to_tuner)
-
-        # ── Game panel ───────────────────────────────────────────
-        self.game_panel.back_to_tuner.connect(self.game_coord.switch_to_tuner)
-
-        # ── Game settings → game panel (direct propagation) ──────
-        gsp.display_mode_changed.connect(self.game_panel.set_display_mode)
-        gsp.game_mode_changed.connect(self.game_panel.set_game_mode)
-        gsp.scale_direction_changed.connect(self.game_panel.set_scale_direction)
-        gsp.game_length_changed.connect(self.game_panel.set_game_length)
-        gsp.hold_duration_changed.connect(self.game_panel.set_hold_duration)
-        gsp.instrument_changed.connect(self.game_panel.set_instrument)
-        gsp.instrument_changed.connect(self._on_game_instrument_changed)
-        gsp.notation_changed.connect(self.game_panel.set_notation)
-        gsp.pitch_hint_changed.connect(self.game_panel.set_show_pitch_hint)
-        gsp.range_categories_changed.connect(
-            self.game_panel.set_enabled_range_categories)
-
-        # ── Game audio widget → sync to main settings ────────────
-        gsp.audio.device_changed.connect(self._on_game_device_changed)
-        gsp.audio.threshold_changed.connect(self.game_coord.sync_threshold_from_game)
-        gsp.audio.buffer_changed.connect(self._on_game_buffer_changed)
 
     # ── audio manager callbacks ──────────────────────────────────
 
     def _on_audio_rms(self, rms: float) -> None:
-        """RMS level update → push to meters in both panels."""
         self.coordinator.update_rms(rms)
 
     def _on_audio_pitch(self, midi: float | None,
                          cents: float | None) -> None:
-        """Pitch data → route to tuner or game based on active view."""
-        if self._view_stack.currentIndex() == 0:
-            self.coordinator.update_tuner(midi)
-            if midi is not None and cents is not None:
-                self.coordinator.update_info_bar(midi, cents)
-        self.coordinator.update_game(midi, cents)
+        self.coordinator.update_current_note(midi, cents)
 
     def _on_audio_history(self, history_copy: list, used: int) -> None:
-        """History update → push to history panel."""
         self.coordinator.update_history(history_copy, used)
 
     def _on_audio_error(self, msg: str) -> None:
-        self.info_panel.show_error(msg)
+        print(f"Audio error: {msg}")
 
     # ── audio lifecycle ──────────────────────────────────────────
 
     def _start_rms_only(self) -> None:
-        """Start audio streaming in RMS-only mode (live on launch)."""
         try:
             device_idx = self._get_device_index()
             self.audio.start_stream(device_idx, self.audio.current_block_size,
                                     self.audio.sample_rate)
             self.settings_panel.set_button_text("▶  Start")
         except Exception as e:
-            self.info_panel.show_error(str(e))
+            print(f"Failed to start audio: {e}")
 
     def _toggle_analysis(self) -> None:
-        """Toggle between full analysis and RMS-only mode."""
         if self.audio.full_analysis_active:
             self._disable_full_analysis()
         else:
             self._enable_full_analysis()
 
     def _enable_full_analysis(self) -> None:
-        """Enable pitch detection + history."""
         if not self.audio.is_running:
             self._start_rms_only()
         self.audio.enable_full_analysis()
@@ -239,22 +133,14 @@ class NoteAnalyzerApp(QMainWindow):
         self.settings_panel.set_button_text("⏹  Stop")
 
     def _disable_full_analysis(self) -> None:
-        """Drop back to RMS-only."""
         self.audio.disable_full_analysis()
         self.settings_panel.set_button_text("▶  Start")
 
     def _sync_audio_settings(self) -> None:
-        """Push current UI settings to the audio manager before processing."""
         self.audio.noise_threshold = self.settings_panel.get_threshold()
         self.audio.instrument_name = self.settings_panel.get_instrument()
         self.audio.use_aubio = self.settings_panel.get_use_aubio()
         self.audio.continue_on_silence = self.settings_panel.get_continue()
-
-    def _on_game_instrument_changed(self, instrument_name: str) -> None:
-        """Sync instrument change from game settings → audio manager
-        (keeps transposition correct) and back to the tuner settings panel."""
-        self.audio.instrument_name = instrument_name
-        self.settings_panel.set_instrument_text(instrument_name)
 
     # ── device management ────────────────────────────────────────
 
@@ -280,10 +166,7 @@ class NoteAnalyzerApp(QMainWindow):
         if self.audio.is_running:
             self._restart_audio_stream()
 
-    def _restart_audio_stream(self, buf_val: int | None = None) -> None:
-        """Restart the audio stream preserving full-analysis state."""
-        if buf_val is not None:
-            self.audio.current_block_size = buf_val
+    def _restart_audio_stream(self) -> None:
         device_idx = self._get_device_index()
         self.audio.restart_stream(device_idx, self.audio.current_block_size,
                                   self.audio.sample_rate)
@@ -294,9 +177,6 @@ class NoteAnalyzerApp(QMainWindow):
             self.settings_panel.set_button_text("▶  Start")
 
     def _request_mic_permission(self) -> None:
-        """Probe microphone in a background thread for OS permission dialog."""
-        import threading
-
         def _probe():
             try:
                 idx = self._get_device_index()
@@ -308,27 +188,8 @@ class NoteAnalyzerApp(QMainWindow):
                 probe.close()
             except Exception:
                 pass
+        import threading
         threading.Thread(target=_probe, daemon=True).start()
-
-    # ── game → main audio sync ──────────────────────────────────
-
-    def _on_game_device_changed(self) -> None:
-        self.game_coord.sync_device_from_game()
-
-    def _on_game_buffer_changed(self, buf_val: int) -> None:
-        self.game_coord.sync_buffer_from_game(buf_val, self.audio.sample_rate)
-
-    # ── view switching ──────────────────────────────────────────
-
-    def _on_game_button(self) -> None:
-        if self._view_stack.currentIndex() == 0:
-            device_names = self.audio.enumerate_devices()
-            self.game_coord.switch_to_game(
-                self.audio.sample_rate,
-                tuner_full_analysis_active=self.audio.full_analysis_active,
-                device_names=device_names)
-        else:
-            self.game_coord.switch_to_tuner()
 
     # ── history ─────────────────────────────────────────────────
 

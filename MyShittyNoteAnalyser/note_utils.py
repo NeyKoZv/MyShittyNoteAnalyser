@@ -1,17 +1,7 @@
-import os
-
 from MyShittyNoteAnalyser.constants import (NOTE_SHARP_SOLFEGE, NOTE_SHARP_LETTER,
                                             NOTE_FLAT_SOLFEGE, NOTE_FLAT_LETTER,
                                             COLOR_ACCENT_PERFECT, COLOR_ACCENT_NICE,
                                             COLOR_ACCENT_GOOD, COLOR_ACCENT_BAD)
-
-
-# ── resource path ────────────────────────────────────────────────────
-
-def resource_path(filename: str) -> str:
-    """Get the absolute path to a resource file."""
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        "resources", filename)
 
 
 # ── MIDI ↔ note name conversion ─────────────────────────────────────
@@ -33,12 +23,6 @@ def midi_to_note_label(midi: int, use_sharps: bool) -> str:
     """Return a user-friendly combined label, e.g. 60 → 'Do (C4)'."""
     solf, letter = midi_to_note_text(midi, use_sharps)
     return f"{solf} ({letter})"
-
-
-def midi_to_letter_octave(midi: int, use_sharps: bool) -> str:
-    """Return letter+octave only, e.g. 60 → 'C4'."""
-    _, letter = midi_to_note_text(midi, use_sharps)
-    return letter
 
 
 # ── cents → accuracy color ──────────────────────────────────────────

@@ -4,6 +4,7 @@ background processing thread, GUI coalescing, and note history.
 
 Extracted from gui.py as part of Phase 3 refactoring.
 """
+import math
 import queue
 import threading
 import logging
@@ -14,7 +15,8 @@ from collections import deque
 from PyQt6.QtCore import QTimer, QObject, pyqtSignal
 
 from MyShittyNoteAnalyser.constants import (INSTRUMENTS, NOTE_HISTORY_MAXLEN,
-                                            DEFAULT_SAMPLE_RATE, DEFAULT_BLOCK_SIZE)
+                                            DEFAULT_SAMPLE_RATE, DEFAULT_BLOCK_SIZE,
+                                            NOISE_THRESHOLD_DB_DEFAULT)
 from MyShittyNoteAnalyser.pitch_detector import detect_pitch, freq_to_midi
 from MyShittyNoteAnalyser.app_state import AppState, validate_transition
 
@@ -55,7 +57,7 @@ class AudioStreamManager(QObject):
         self.processing_thread: threading.Thread | None = None
 
         # ── pitch detection settings (updated externally) ──────
-        self.noise_threshold: float = 0.02
+        self.noise_threshold: float = float(NOISE_THRESHOLD_DB_DEFAULT)
         self.instrument_name: str = "Concert (C)"
         self.use_aubio: bool = True
         self.continue_on_silence: bool = False
@@ -159,11 +161,11 @@ class AudioStreamManager(QObject):
                 self.stream.stop()
                 self.stream.close()
             except Exception:
-                pass
+                _logger.debug("Error stopping audio stream", exc_info=True)
             self.stream = None
 
-        # Drain queue
-        while not self.audio_queue.empty():
+        # Drain queue (break on Empty — no TOCTOU between check and get)
+        while True:
             try:
                 self.audio_queue.get_nowait()
             except queue.Empty:
@@ -229,7 +231,8 @@ class AudioStreamManager(QObject):
                 if not self._full_analysis:
                     continue
 
-                if rms < self.noise_threshold:
+                rms_db = 20.0 * math.log10(max(rms, 1e-10))
+                if rms_db < self.noise_threshold:
                     if self.continue_on_silence:
                         with self._history_lock:
                             self.note_history.append(None)

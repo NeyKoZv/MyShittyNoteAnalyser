@@ -1,38 +1,56 @@
 """
 Shared audio-settings widget — microphone, noise threshold + RMS meter,
-buffer size. Used identically by both the tuner SettingsPanel and the
-game GameSettingsPanel.
+buffer size. Used by the tuner SettingsPanel.
 """
+import math
+
 from PyQt6.QtWidgets import (QWidget, QLabel, QComboBox, QSlider,
                                QHBoxLayout, QGridLayout)
 from PyQt6.QtGui import QPainter, QColor, QPen
 from PyQt6.QtCore import Qt, pyqtSignal
 
 from MyShittyNoteAnalyser.constants import (DEFAULT_SAMPLE_RATE, DEFAULT_BLOCK_SIZE,
-                       BUFFER_OPTIONS, NOISE_THRESHOLD_DEFAULT,
-                       NOISE_THRESHOLD_MIN, NOISE_THRESHOLD_MAX,
+                       BUFFER_OPTIONS, NOISE_THRESHOLD_DB_MIN,
+                       NOISE_THRESHOLD_DB_MAX, NOISE_THRESHOLD_DB_DEFAULT,
                        COLOR_ACCENT_PERFECT, COLOR_ACCENT_GOOD,
                        COLOR_ACCENT_BAD)
 from MyShittyNoteAnalyser.note_utils import format_buffer_display
+
+# ── RMS meter dB range ────────────────────────────────────────────
+_METER_DB_FLOOR = -60   # corresponds to an empty bar
+_METER_DB_CEIL = 0      # corresponds to a full bar
+
+
+def _rms_to_db(rms: float) -> float:
+    """Convert a linear RMS amplitude to dB (20⋅log₁₀), clamped."""
+    if rms <= 0:
+        return _METER_DB_FLOOR
+    db = 20.0 * math.log10(rms)
+    return max(db, _METER_DB_FLOOR)
 
 
 # ── RMS meter (tiny bar) ──────────────────────────────────────────
 
 class _RMSMeter(QWidget):
-    """Tiny bar showing the current RMS level relative to max threshold."""
+    """Tiny bar showing the current RMS level on a dB scale."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(60, 12)
-        self._level: float = 0.0  # fraction 0..1
-        self._thresh_pos: float = NOISE_THRESHOLD_DEFAULT / NOISE_THRESHOLD_MAX
+        self._db_level: float = _METER_DB_FLOOR
+        self._db_thresh: float = NOISE_THRESHOLD_DB_DEFAULT
 
-    def set_level(self, fraction: float) -> None:
-        self._level = max(0.0, min(1.0, fraction))
+    def _db_to_frac(self, db: float) -> float:
+        """Map a dB value to a 0..1 fraction across the meter range."""
+        span = _METER_DB_CEIL - _METER_DB_FLOOR
+        return max(0.0, min(1.0, (db - _METER_DB_FLOOR) / span))
+
+    def set_level_db(self, db_level: float) -> None:
+        self._db_level = max(_METER_DB_FLOOR, db_level)
         self.update()
 
-    def set_threshold_line(self, threshold_fraction: float) -> None:
-        self._thresh_pos = max(0.0, min(1.0, threshold_fraction))
+    def set_threshold_db(self, db_thresh: float) -> None:
+        self._db_thresh = db_thresh
         self.update()
 
     def paintEvent(self, event):
@@ -40,17 +58,21 @@ class _RMSMeter(QWidget):
         w, h = self.width(), self.height()
         p.fillRect(0, 0, w, h, QColor("#222"))
 
-        if self._level > 0:
-            bar_w = int(self._level * w)
-            if self._level < 0.3:
+        level_frac = self._db_to_frac(self._db_level)
+        if level_frac > 0:
+            bar_w = int(level_frac * w)
+            # Colour based on how close the level is to the threshold
+            margin_db = self._db_level - self._db_thresh
+            if margin_db < -12:
                 color = QColor(COLOR_ACCENT_PERFECT)
-            elif self._level < 0.7:
+            elif margin_db < -3:
                 color = QColor(COLOR_ACCENT_GOOD)
             else:
                 color = QColor(COLOR_ACCENT_BAD)
             p.fillRect(0, 0, bar_w, h, color)
 
-        line_x = int(self._thresh_pos * w)
+        thresh_frac = self._db_to_frac(self._db_thresh)
+        line_x = int(thresh_frac * w)
         p.setPen(QPen(QColor("#ff4444"), 1))
         p.drawLine(line_x, 0, line_x, h)
         p.end()
@@ -110,17 +132,15 @@ class AudioSettingsWidget(QWidget):
 
         self._threshold_slider = QSlider(Qt.Orientation.Horizontal)
         self._threshold_slider.setRange(
-            int(NOISE_THRESHOLD_MIN * 1000),
-            int(NOISE_THRESHOLD_MAX * 1000))
-        self._threshold_slider.setValue(
-            int(NOISE_THRESHOLD_DEFAULT * 1000))
+            NOISE_THRESHOLD_DB_MIN, NOISE_THRESHOLD_DB_MAX)
+        self._threshold_slider.setValue(NOISE_THRESHOLD_DB_DEFAULT)
         self._threshold_slider.valueChanged.connect(
             self._on_threshold_changed)
         self._threshold_slider.setMaximumWidth(100)
         thr_layout.addWidget(self._threshold_slider)
 
-        self._threshold_lbl = QLabel(f"{NOISE_THRESHOLD_DEFAULT:.3f}")
-        self._threshold_lbl.setFixedWidth(36)
+        self._threshold_lbl = QLabel(f"{NOISE_THRESHOLD_DB_DEFAULT} dB")
+        self._threshold_lbl.setMinimumWidth(52)
         thr_layout.addWidget(self._threshold_lbl)
 
         self._rms_meter = _RMSMeter()
@@ -142,11 +162,10 @@ class AudioSettingsWidget(QWidget):
 
     # ── internal signal handlers ──────────────────────────────────
 
-    def _on_threshold_changed(self, val: int) -> None:
-        value = val / 1000.0
-        self._threshold_lbl.setText(f"{value:.3f}")
-        self._rms_meter.set_threshold_line(value / NOISE_THRESHOLD_MAX)
-        self.threshold_changed.emit(value)
+    def _on_threshold_changed(self, db_val: int) -> None:
+        self._threshold_lbl.setText(f"{db_val} dB")
+        self._rms_meter.set_threshold_db(db_val)
+        self.threshold_changed.emit(float(db_val))
 
     def _on_device_changed(self, _text: str) -> None:
         self.device_changed.emit()
@@ -158,13 +177,15 @@ class AudioSettingsWidget(QWidget):
             buf_val = int(text.split()[0])
             self.buffer_changed.emit(buf_val)
         except (ValueError, IndexError):
-            pass
+            import logging
+            logging.getLogger(__name__).debug(
+                "Could not parse buffer size from text: %r", text)
 
     # ── public API ────────────────────────────────────────────────
 
     def set_rms_level(self, rms: float) -> None:
-        """Show the current RMS level (relative to max threshold)."""
-        self._rms_meter.set_level(rms / NOISE_THRESHOLD_MAX)
+        """Show the current RMS level on the dB meter."""
+        self._rms_meter.set_level_db(_rms_to_db(rms))
 
     def set_sample_rate(self, sr: int) -> None:
         """Update sample rate and rebuild buffer display strings."""
@@ -222,12 +243,12 @@ class AudioSettingsWidget(QWidget):
             self._device_cb.setCurrentIndex(idx)
         self._device_cb.blockSignals(False)
 
-    def set_threshold_value(self, value: float) -> None:
-        """Programmatically set the threshold slider."""
+    def set_threshold_value(self, db_value: float) -> None:
+        """Programmatically set the threshold slider (dB value)."""
         self._threshold_slider.blockSignals(True)
-        self._threshold_slider.setValue(int(value * 1000))
+        self._threshold_slider.setValue(int(db_value))
         self._threshold_slider.blockSignals(False)
-        self._on_threshold_changed(int(value * 1000))
+        self._on_threshold_changed(int(db_value))
 
     def set_buffer_display(self, text: str) -> None:
         """Programmatically set the buffer by display string."""
@@ -243,7 +264,7 @@ class AudioSettingsWidget(QWidget):
         return self._device_cb.currentText()
 
     def get_threshold(self) -> float:
-        return self._threshold_slider.value() / 1000.0
+        return float(self._threshold_slider.value())
 
     def get_buffer_size(self) -> int:
         text = self._buffer_cb.currentText()

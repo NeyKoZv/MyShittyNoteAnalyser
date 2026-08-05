@@ -10,4 +10,4 @@ if __name__ == "__main__":
     app.setStyleSheet(STYLESHEET)
     window = NoteAnalyzerApp()
     window.show()
-    app.exec()
+    sys.exit(app.exec())

@@ -1,5 +1,3 @@
-from PyQt6.QtWidgets import QLabel
-
 from MyShittyNoteAnalyser.constants import (COLOR_BG_DARK, COLOR_BG_DARKER, COLOR_BG_INPUT,
                                             COLOR_FG_PRIMARY, COLOR_FG_SECONDARY,
                                             COLOR_BUTTON_ACTIVE)
@@ -125,8 +123,12 @@ QLabel {{
 
 # ── reusable UI helpers ─────────────────────────────────────────────
 
-def section_header(text: str) -> QLabel:
-    """Return a bold, small-font section-header label used by settings panels."""
-    lbl = QLabel(text)
-    lbl.setStyleSheet("font-weight: bold; font-size: 8pt;")
-    return lbl
+def section_separator() -> 'QFrame':
+    """Return a thin horizontal separator line for compact layouts."""
+    from PyQt6.QtWidgets import QFrame
+    line = QFrame()
+    line.setFrameShape(QFrame.Shape.HLine)
+    line.setFrameShadow(QFrame.Shadow.Sunken)
+    line.setStyleSheet("color: #444;")
+    line.setFixedHeight(1)
+    return line

@@ -52,21 +52,20 @@ DEFAULT_SAMPLE_RATE = 44100
 DEFAULT_BLOCK_SIZE = 2048
 BUFFER_OPTIONS = [128, 256, 512, 1024, 2048, 4096]
 
-# Threshold
-NOISE_THRESHOLD_DEFAULT = 0.02
-NOISE_THRESHOLD_MIN = 0.0
-NOISE_THRESHOLD_MAX = 0.05
+# Threshold (dB, referenced to full-scale amplitude = 1.0)
+NOISE_THRESHOLD_DB_MIN = -60
+NOISE_THRESHOLD_DB_MAX = -20
+NOISE_THRESHOLD_DB_DEFAULT = -36
+
+
+def db_to_linear(db: float) -> float:
+    """Convert a dB value (20⋅log₁₀ ratio) to a linear amplitude ratio."""
+    return 10.0 ** (db / 20.0)
 
 # Layout
 APP_GEOMETRY = "950x700"
-TUNER_WIDTH = 80
-TUNER_HEIGHT = 200
-TUNER_MARGIN = 15
-TUNER_DOT_RADIUS = 6
 HISTORY_NOTE_GAP = 10
 HISTORY_SCALE_WIDTH = 90
-METER_WIDTH = 150
-METER_HEIGHT = 15
 
 # Color palette — shared across all panels
 # Backgrounds
@@ -74,7 +73,6 @@ COLOR_BG_DARK = '#2b2b2b'
 COLOR_BG_DARKER = '#1e1e1e'
 COLOR_BG_INPUT = '#3c3c3c'
 COLOR_BG_CANVAS = '#1e1e1e'
-COLOR_BG_METER = '#333333'
 
 # Foregrounds
 COLOR_FG_PRIMARY = 'white'
@@ -86,10 +84,6 @@ COLOR_FG_SELECTED = 'white'
 # Grid and scale
 COLOR_GRID_LINE = '#333333'
 COLOR_GRID_LABEL = '#cccccc'
-COLOR_TUNER_TICK = '#666666'
-COLOR_TUNER_LABEL = '#aaaaaa'
-COLOR_METER_TICK = 'gray'
-COLOR_METER_CENTER = 'white'
 
 # Accuracy accent colors
 COLOR_ACCENT_PERFECT = '#00ff88'
@@ -97,6 +91,4 @@ COLOR_ACCENT_NICE = '#44aaff'
 COLOR_ACCENT_GOOD = '#ffaa00'
 COLOR_ACCENT_BAD = '#ff5555'
 
-# Misc
-COLOR_ERROR = 'red'
 COLOR_BUTTON_ACTIVE = '#4a4a4a'

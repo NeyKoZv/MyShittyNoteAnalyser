@@ -2,7 +2,7 @@ import numpy as np
 import math
 import logging
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
 
 _aubio_pitch_cache = {}
 
@@ -25,8 +25,8 @@ def detect_pitch(audio, sample_rate, block_size, use_aubio=True):
     """
     if use_aubio:
         try:
-            import aubio
             pitch_o = _get_aubio_pitch(block_size, sample_rate)
+            import aubio
             vec = aubio.fvec(audio)
             freq = pitch_o(vec)[0]
             if freq > 0:
@@ -37,7 +37,7 @@ def detect_pitch(audio, sample_rate, block_size, use_aubio=True):
             pass
         except Exception as e:
             # Other errors (e.g., FFT size not power of two) – fall back
-            logger.warning("aubio error: %s, falling back to autocorrelation", e)
+            _logger.warning("aubio error: %s, falling back to autocorrelation", e)
             pass
 
     # ------------------------------------------------------------------
