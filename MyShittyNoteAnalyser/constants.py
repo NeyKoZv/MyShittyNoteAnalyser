@@ -57,11 +57,6 @@ NOISE_THRESHOLD_DB_MIN = -60
 NOISE_THRESHOLD_DB_MAX = -20
 NOISE_THRESHOLD_DB_DEFAULT = -36
 
-
-def db_to_linear(db: float) -> float:
-    """Convert a dB value (20⋅log₁₀ ratio) to a linear amplitude ratio."""
-    return 10.0 ** (db / 20.0)
-
 # Layout
 APP_GEOMETRY = "950x700"
 HISTORY_NOTE_GAP = 10

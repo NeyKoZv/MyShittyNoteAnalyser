@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (QWidget, QLabel, QComboBox, QSlider,
 from PyQt6.QtGui import QPainter, QColor, QPen
 from PyQt6.QtCore import Qt, pyqtSignal
 
-from MyShittyNoteAnalyser.constants import (DEFAULT_SAMPLE_RATE, DEFAULT_BLOCK_SIZE,
+from MyShittyNoteAnalyser.constants import (DEFAULT_SAMPLE_RATE,
                        BUFFER_OPTIONS, NOISE_THRESHOLD_DB_MIN,
                        NOISE_THRESHOLD_DB_MAX, NOISE_THRESHOLD_DB_DEFAULT,
                        COLOR_ACCENT_PERFECT, COLOR_ACCENT_GOOD,
@@ -235,28 +235,12 @@ class AudioSettingsWidget(QWidget):
             self._device_cb.addItem("No input device found")
         self._device_cb.blockSignals(False)
 
-    def set_device_text(self, text: str) -> None:
-        """Programmatically set the selected device."""
-        self._device_cb.blockSignals(True)
-        idx = self._device_cb.findText(text)
-        if idx >= 0:
-            self._device_cb.setCurrentIndex(idx)
-        self._device_cb.blockSignals(False)
-
     def set_threshold_value(self, db_value: float) -> None:
         """Programmatically set the threshold slider (dB value)."""
         self._threshold_slider.blockSignals(True)
         self._threshold_slider.setValue(int(db_value))
         self._threshold_slider.blockSignals(False)
         self._on_threshold_changed(int(db_value))
-
-    def set_buffer_display(self, text: str) -> None:
-        """Programmatically set the buffer by display string."""
-        self._buffer_cb.blockSignals(True)
-        idx = self._buffer_cb.findText(text)
-        if idx >= 0:
-            self._buffer_cb.setCurrentIndex(idx)
-        self._buffer_cb.blockSignals(False)
 
     # ── getters ───────────────────────────────────────────────────
 
@@ -265,7 +249,3 @@ class AudioSettingsWidget(QWidget):
 
     def get_threshold(self) -> float:
         return float(self._threshold_slider.value())
-
-    def get_buffer_size(self) -> int:
-        text = self._buffer_cb.currentText()
-        return self.display_to_buffer.get(text, DEFAULT_BLOCK_SIZE)

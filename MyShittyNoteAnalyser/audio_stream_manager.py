@@ -12,7 +12,7 @@ import logging
 import numpy as np
 import sounddevice as sd
 from collections import deque
-from PyQt6.QtCore import QTimer, QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal
 
 from MyShittyNoteAnalyser.constants import (INSTRUMENTS, NOTE_HISTORY_MAXLEN,
                                             DEFAULT_SAMPLE_RATE, DEFAULT_BLOCK_SIZE,
@@ -320,7 +320,3 @@ class AudioStreamManager(QObject):
     def clear_history(self) -> None:
         with self._history_lock:
             self.note_history.clear()
-
-    def get_history_copy(self) -> list:
-        with self._history_lock:
-            return list(self.note_history)

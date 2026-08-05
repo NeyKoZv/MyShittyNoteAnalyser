@@ -1,5 +1,5 @@
-from MyShittyNoteAnalyser.constants import (COLOR_BG_DARK, COLOR_BG_DARKER, COLOR_BG_INPUT,
-                                            COLOR_FG_PRIMARY, COLOR_FG_SECONDARY,
+from MyShittyNoteAnalyser.constants import (COLOR_BG_DARK, COLOR_BG_INPUT,
+                                            COLOR_FG_PRIMARY,
                                             COLOR_BUTTON_ACTIVE)
 
 STYLESHEET = f"""

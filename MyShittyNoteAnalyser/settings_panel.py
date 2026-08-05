@@ -9,6 +9,7 @@ from MyShittyNoteAnalyser.constants import (MIN_MIDI, MAX_MIDI, INSTRUMENTS,
                                             NOTATION_OPTIONS, DEFAULT_NOTATION, DEFAULT_INSTRUMENT)
 from MyShittyNoteAnalyser.audio_settings_widget import AudioSettingsWidget
 from MyShittyNoteAnalyser.instrument_notation import resolve_notation_on_instrument_change
+from MyShittyNoteAnalyser.metronome_widget import MetronomeWidget
 from MyShittyNoteAnalyser.range_slider import RangeSlider
 from MyShittyNoteAnalyser.theme import section_separator
 
@@ -126,6 +127,10 @@ class SettingsPanel(QGroupBox):
         btn_layout.addWidget(self._reset_btn, stretch=1)
         main_layout.addLayout(btn_layout)
 
+        # ── Metronome (self-contained, under Start/Reset) ───────────
+        self._metronome = MetronomeWidget()
+        main_layout.addWidget(self._metronome)
+
         main_layout.addStretch()
 
     def _add_section_label(self, layout, text: str) -> None:
@@ -187,14 +192,13 @@ class SettingsPanel(QGroupBox):
         self._range_slider.set_notation(DEFAULT_NOTATION)
         self._range_slider.blockSignals(False)
 
+        self._metronome.reset_to_defaults()
+
         self.reset_requested.emit()
 
     def set_sample_rate(self, sr: int) -> None:
         self.sample_rate = sr
         self._audio.set_sample_rate(sr)
-
-    def build_buffer_options(self) -> None:
-        self._audio.build_buffer_options()
 
     def populate_devices(self, device_list: list[str]) -> None:
         self._audio.populate_devices(device_list)
@@ -203,9 +207,6 @@ class SettingsPanel(QGroupBox):
 
     def get_device(self) -> str:
         return self._audio.get_device()
-
-    def get_buffer_size(self) -> int:
-        return self._audio.get_buffer_size()
 
     def get_threshold(self) -> float:
         return self._audio.get_threshold()
@@ -232,21 +233,6 @@ class SettingsPanel(QGroupBox):
         return self._range_slider.get_high()
 
     # ── setters ────────────────────────────────────────────────────
-
-    def set_device_text(self, text: str) -> None:
-        self._audio.set_device_text(text)
-
-    def set_instrument_text(self, text: str) -> None:
-        """Sync instrument combo from an external change."""
-        self._instr_cb.blockSignals(True)
-        self._instr_cb.setCurrentText(text)
-        self._instr_cb.blockSignals(False)
-
-    def set_threshold_value(self, value: float) -> None:
-        self._audio.set_threshold_value(value)
-
-    def set_buffer_display(self, text: str) -> None:
-        self._audio.set_buffer_display(text)
 
     def set_start_stop_callback(self, callback) -> None:
         self._start_btn.clicked.connect(callback)

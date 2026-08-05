@@ -1,5 +1,6 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout)
 from PyQt6.QtCore import QTimer
+import sounddevice as sd
 
 from MyShittyNoteAnalyser.constants import APP_GEOMETRY as _APP_GEOMETRY
 from MyShittyNoteAnalyser.settings_panel import SettingsPanel
@@ -180,7 +181,7 @@ class NoteAnalyzerApp(QMainWindow):
         def _probe():
             try:
                 idx = self._get_device_index()
-                probe = __import__('sounddevice').InputStream(
+                probe = sd.InputStream(
                     device=idx, channels=1,
                     samplerate=self.audio.sample_rate, blocksize=512)
                 probe.start()

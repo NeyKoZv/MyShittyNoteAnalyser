@@ -35,6 +35,11 @@ pixi run pytest tests/
 - Optional quantize-to-semitone snapping for the history display
 - Adjustable noise threshold, buffer size, MIDI range, sample rate, and microphone selection
 - Live RMS level meter with a visual noise-threshold marker
+- Built-in **metronome** with a live beat indicator:
+  - BPM control (type a value, or click-and-drag to scrub — drag up/right speeds up, down/left slows down)
+  - Selectable time signature (4/4, 3/4, 2/4, 5/4, 6/8, 7/8) that controls how many beats are shown
+  - Visual representation of the current beat inside the measure (accented downbeat on beat 1)
+  - Click sounds are synthesized on the fly (no audio files needed); a 🔊 toggle can mute the sound while keeping the visual
 - **Continue on silence** — optionally log silences (`---`) to the history instead of skipping them
 - Pitch detection uses **aubio** when available, with an **autocorrelation + parabolic interpolation** fallback
 - Aubio `pitch` objects are cached by `(block_size, sample_rate)` for efficiency
@@ -74,6 +79,7 @@ MyShittyNoteAnalyser/
 ├── settings_panel.py           tuner settings (instrument, notation, MIDI range, audio)
 ├── audio_settings_widget.py    shared mic / noise threshold + RMS / buffer widget
 ├── range_slider.py             dual-handle MIDI range slider
+├── metronome_widget.py         self-contained metronome + live beat indicator
 ├── history_panel.py            scrollable pitch history with scale labels & live note
 │
 ├── instrument_notation.py      instrument → default notation (sharps/flats) mapping

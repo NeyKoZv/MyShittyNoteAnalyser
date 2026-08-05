@@ -39,18 +39,6 @@ def cents_to_color(cents: float) -> str:
     return COLOR_ACCENT_BAD
 
 
-def cents_to_accuracy(cents: float) -> tuple[str, str]:
-    """Return (label, color_hex) for a cents deviation, e.g. ('Perfect', '#00ff88')."""
-    a = abs(cents)
-    if a < 5:
-        return "Perfect", COLOR_ACCENT_PERFECT
-    if a < 20:
-        return "Nice", COLOR_ACCENT_NICE
-    if a < 50:
-        return "Good", COLOR_ACCENT_GOOD
-    return "Bad", COLOR_ACCENT_BAD
-
-
 # ── MIDI ↔ pixel position ───────────────────────────────────────────
 
 def midi_to_y(midi: float, min_midi: int, max_midi: int,

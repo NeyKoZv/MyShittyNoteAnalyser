@@ -5,13 +5,11 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 from MyShittyNoteAnalyser.constants import (MIN_MIDI, MAX_MIDI, NOTE_SHARP_LETTER, NOTE_SHARP_SOLFEGE,
                                             NOTE_FLAT_LETTER, NOTE_FLAT_SOLFEGE,
-                                            COLOR_BG_DARK, COLOR_BG_DARKER, COLOR_BG_CANVAS,
-                                            COLOR_BG_INPUT, COLOR_FG_PRIMARY,
+                                            COLOR_BG_CANVAS,
                                             COLOR_GRID_LINE, COLOR_GRID_LABEL,
-                                            COLOR_ACCENT_PERFECT,
                                             HISTORY_NOTE_GAP, HISTORY_SCALE_WIDTH,
                                             DEFAULT_NOTATION)
-from MyShittyNoteAnalyser.note_utils import cents_to_color, midi_to_y, midi_to_note_text, cents_to_accuracy
+from MyShittyNoteAnalyser.note_utils import cents_to_color, midi_to_y, midi_to_note_text
 
 
 class _HistoryCanvas(QWidget):
