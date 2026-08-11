@@ -40,9 +40,9 @@ DEFAULT_NOTATION_BY_INSTRUMENT = {
     "Bass Guitar":      "Sharps",
 }
 
-# Fixed MIDI range (C2–B5)
-MIN_MIDI = 48
-MAX_MIDI = 74
+# Fixed MIDI range (E3–B5)
+MIN_MIDI = 52
+MAX_MIDI = 83
 
 # History
 NOTE_HISTORY_MAXLEN = 100000
